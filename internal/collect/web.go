@@ -34,7 +34,12 @@ const (
 	// embedded scripts or images, while keeping memory bounded even when
 	// every website target is checked at once.
 	maxBodyReadBytes = 256 * 1024
-	certWarnWithin   = 14 * 24 * time.Hour
+	// maxBodyDrain is all a target without a content check ever needs to
+	// read: enough to let the connection be reused, and no more. Pulling
+	// the full content-check allowance down every wire every minute would
+	// be bandwidth spent on bytes nothing then looks at.
+	maxBodyDrain   = 64 * 1024
+	certWarnWithin = 14 * 24 * time.Hour
 )
 
 var errRedirectLimit = errors.New("redirect limit exceeded")
@@ -134,11 +139,11 @@ func (w *webCollector) Collect(ctx context.Context, t protocol.Target) protocol.
 	// connection can be reused) without paying for an allocation it has
 	// no use for.
 	var bodyBuf bytes.Buffer
-	dest := io.Writer(io.Discard)
+	dest, limit := io.Writer(io.Discard), int64(maxBodyDrain)
 	if t.Contains != "" {
-		dest = &bodyBuf
+		dest, limit = &bodyBuf, maxBodyReadBytes
 	}
-	_, _ = io.Copy(dest, io.LimitReader(resp.Body, maxBodyReadBytes))
+	_, _ = io.Copy(dest, io.LimitReader(resp.Body, limit))
 
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		expiry := resp.TLS.PeerCertificates[0].NotAfter
