@@ -31,6 +31,15 @@ targets:
         # A menu bar app has no Dock presence and no main menu of its own.
         LSUIElement: true
         NSHumanReadableCopyright: "Copyright 2026 Levi Mackay"
+        # Lets a widget tap (or a notification tap) hand a URL back to this
+        # process instead of just launching it invisibly. Without a
+        # registered scheme, "open the app" from outside it is either
+        # impossible or limited to a bare activate with no way to say what
+        # was clicked.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.levimackay.beacon
+            CFBundleURLSchemes:
+              - beacon
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.levimackay.beacon

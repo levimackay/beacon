@@ -6,6 +6,11 @@ import SwiftUI
 struct MenuBarPanel: View {
     var poller: HubPoller
 
+    /// Backed by the same UserDefaults key IncidentNotifier reads directly,
+    /// so the switch and the thing it controls can never see two different
+    /// answers for "is this on".
+    @AppStorage(NotificationSettings.key) private var notificationsEnabled = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -140,6 +145,19 @@ struct MenuBarPanel: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                notificationsEnabled.toggle()
+                // Asking right now, on the deliberate action of turning
+                // this on, means the system prompt (if one is still owed)
+                // appears at a moment the user chose rather than silently
+                // waiting for the first real incident to ask on its own.
+                if notificationsEnabled { IncidentNotifier.requestAuthorizationIfNeeded() }
+            } label: {
+                Image(systemName: notificationsEnabled ? "bell.fill" : "bell.slash.fill")
+            }
+            .buttonStyle(.accessoryBar)
+            .help(notificationsEnabled ? "Turn off notifications" : "Turn on notifications")
+            .accessibilityLabel(notificationsEnabled ? "Notifications on" : "Notifications off")
             Button("Refresh") { Task { await poller.refresh() } }
                 .buttonStyle(.accessoryBar)
             Button("Quit") { NSApplication.shared.terminate(nil) }
