@@ -221,6 +221,33 @@ a failure. The cloud metadata address (`169.254.169.254`) is refused even
 with `AllowPrivate` set: no legitimate monitoring target needs it, and
 its exposure is exactly how an SSRF turns into a stolen credential.
 
+The guard judges an address by what it actually reaches, not by how it is
+written. An IPv6 address that carries an IPv4 address inside it is
+unwrapped and the embedded address is checked: IPv4-mapped
+(`::ffff:169.254.169.254`), IPv4-compatible (`::169.254.169.254`), the
+NAT64 prefixes from RFC 6052 and RFC 8215 (`64:ff9b::a9fe:a9fe`, which
+reaches the metadata endpoint on any DNS64/NAT64 network), 6to4
+(`2002:a9fe:a9fe::`) and Teredo. Only the IPv4-mapped form is folded by
+Go's standard library, so the rest would otherwise be unguarded routes to
+precisely the addresses the guard exists to refuse.
+
+Non-canonical numeric addresses are refused outright rather than
+resolved: octal (`0177.0.0.1`), bare integers (`2130706433`),
+hexadecimal (`0x7f000001`) and shortened dotted forms (`127.1`). Whether
+those resolve, and to what, is decided by the resolver the binary was
+linked against, and a static `CGO_ENABLED=0` build for the Raspberry Pi
+uses a different one than a macOS build. A guard whose behaviour depends
+on the C library it was linked against is not a guard, so Beacon requires
+a canonical address. CI runs the guard's tests under both resolvers to
+keep that from drifting.
+
+The address check is repeated at dial time against the address actually
+being connected to, not only against what DNS returned during
+validation. That closes the window in which a name resolves to a
+permitted address during the check and a forbidden one by the time the
+connection is made. Every redirect hop goes through the same check, and
+redirects are capped at three.
+
 **Dial-time recheck.** The guard's URL check happens twice: once before
 the request (`CheckURL`, rejecting a disallowed scheme or a hostname that
 resolves nowhere useful), and again inside the actual dial

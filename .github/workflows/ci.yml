@@ -56,6 +56,30 @@ jobs:
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
 
+  resolver-parity:
+    name: SSRF guard (pure-Go resolver)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # Whether a non-canonical numeric address resolves, and to what, is
+      # decided by the resolver the binary was linked against. A static
+      # CGO_ENABLED=0 build for the Raspberry Pi uses Go's own resolver
+      # rather than the system one, so the SSRF guard is exercised under
+      # both to keep its behaviour from depending on the build.
+      - name: Guard tests, pure-Go resolver
+        env:
+          CGO_ENABLED: "0"
+          GODEBUG: netdns=go
+        run: go test -count=1 ./internal/collect/...
+      - name: Guard tests, system resolver
+        env:
+          CGO_ENABLED: "1"
+          GODEBUG: netdns=cgo
+        run: go test -count=1 ./internal/collect/...
+
   cross-compile-pi:
     name: cross-compile (linux/arm64)
     runs-on: ubuntu-latest
