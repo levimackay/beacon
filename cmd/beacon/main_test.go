@@ -169,6 +169,59 @@ func TestAddPrivateFlag(t *testing.T) {
 	}
 }
 
+func TestAddContainsFlag(t *testing.T) {
+	var got protocol.Target
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCmd(t, []string{"add", "https://example.com", "--name", "Example", "--contains", "Welcome"}, newTestClientFn(srv))
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+	}
+	if got.Contains != "Welcome" {
+		t.Errorf("Contains = %q, want %q", got.Contains, "Welcome")
+	}
+}
+
+func TestAddWarnAfterFlag(t *testing.T) {
+	var got protocol.Target
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCmd(t, []string{"add", "https://example.com", "--name", "Example", "--warn-after", "2s"}, newTestClientFn(srv))
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+	}
+	if got.WarnAfterMS != 2000 {
+		t.Errorf("WarnAfterMS = %d, want 2000", got.WarnAfterMS)
+	}
+}
+
+func TestAddRejectsBadWarnAfter(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCmd(t, []string{"add", "https://example.com", "--name", "Example", "--warn-after", "not-a-duration"}, newTestClientFn(srv))
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stderr == "" {
+		t.Fatal("expected an explanatory message on stderr")
+	}
+	if requested {
+		t.Fatal("no HTTP request should have been made")
+	}
+}
+
 func TestAddRejectsShortInterval(t *testing.T) {
 	requested := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

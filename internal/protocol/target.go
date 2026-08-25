@@ -21,6 +21,20 @@ type Target struct {
 	// become a way to probe the machine Beacon runs on. It never
 	// permits the cloud metadata address.
 	AllowPrivate bool `json:"allowPrivate,omitempty"`
+	// Contains, when set, is a substring the response body must contain
+	// for a website target to count as healthy. A status code alone only
+	// proves that something answered: a parked domain, a defaced site, or
+	// a blank error page can all return 200. Empty means no body
+	// assertion is made, which keeps every target created before this
+	// field existed behaving exactly as it did before.
+	Contains string `json:"contains,omitempty"`
+	// WarnAfterMS, when non-zero, is the response latency in milliseconds
+	// above which a website target is reported warning rather than
+	// healthy, even though its status and body both check out. Zero means
+	// no latency threshold is configured, so a slow response is reported
+	// healthy, matching every target's behaviour before this field
+	// existed.
+	WarnAfterMS int `json:"warnAfterMs,omitempty"`
 }
 
 // Validate rejects targets that would be unsafe or nonsensical to schedule.
@@ -49,6 +63,9 @@ func (t Target) Validate() error {
 	}
 	if t.ExpectStatus != 0 && (t.ExpectStatus < 100 || t.ExpectStatus > 599) {
 		return fmt.Errorf("expected status %d is not a valid HTTP status", t.ExpectStatus)
+	}
+	if t.WarnAfterMS < 0 {
+		return errors.New("warn-after must not be negative")
 	}
 	return nil
 }

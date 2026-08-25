@@ -27,6 +27,8 @@ func fullyPopulatedTarget() protocol.Target {
 		ExpectStatus:    204,
 		Enabled:         true,
 		AllowPrivate:    true,
+		Contains:        "Round Trip",
+		WarnAfterMS:     1500,
 	}
 }
 
@@ -150,10 +152,18 @@ func TestOpenMigratesADatabaseFromAnOlderBuild(t *testing.T) {
 	if got[0].AllowPrivate {
 		t.Error("a target from before the column existed should default to no private access")
 	}
+	if got[0].Contains != "" {
+		t.Errorf("Contains = %q, want empty for a target from before the column existed", got[0].Contains)
+	}
+	if got[0].WarnAfterMS != 0 {
+		t.Errorf("WarnAfterMS = %d, want 0 for a target from before the column existed", got[0].WarnAfterMS)
+	}
 
-	// And the new column is now usable.
+	// And the new columns are now usable.
 	updated := got[0]
 	updated.AllowPrivate = true
+	updated.Contains = "Legacy"
+	updated.WarnAfterMS = 3000
 	if err := s.UpsertTarget(ctx, updated); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +172,13 @@ func TestOpenMigratesADatabaseFromAnOlderBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !after[0].AllowPrivate {
-		t.Fatal("the migrated column does not persist a value")
+		t.Fatal("the migrated allow_private column does not persist a value")
+	}
+	if after[0].Contains != "Legacy" {
+		t.Fatalf("Contains = %q, want %q", after[0].Contains, "Legacy")
+	}
+	if after[0].WarnAfterMS != 3000 {
+		t.Fatalf("WarnAfterMS = %d, want 3000", after[0].WarnAfterMS)
 	}
 }
 

@@ -13,14 +13,15 @@ func TestTargetValidate(t *testing.T) {
 	}
 
 	bad := map[string]Target{
-		"missing id":        {Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 60},
-		"missing name":      {ID: "a", Kind: KindWebsite, Address: "https://e.com", IntervalSeconds: 60},
-		"unknown kind":      {ID: "a", Kind: "database", Name: "x", Address: "y", IntervalSeconds: 60},
-		"missing address":   {ID: "a", Kind: KindWebsite, Name: "x", IntervalSeconds: 60},
-		"interval too low":  {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 1},
-		"interval negative": {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: -60},
-		"interval too high": {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 90000},
-		"bad status":        {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 60, ExpectStatus: 42},
+		"missing id":          {Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 60},
+		"missing name":        {ID: "a", Kind: KindWebsite, Address: "https://e.com", IntervalSeconds: 60},
+		"unknown kind":        {ID: "a", Kind: "database", Name: "x", Address: "y", IntervalSeconds: 60},
+		"missing address":     {ID: "a", Kind: KindWebsite, Name: "x", IntervalSeconds: 60},
+		"interval too low":    {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 1},
+		"interval negative":   {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: -60},
+		"interval too high":   {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 90000},
+		"bad status":          {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 60, ExpectStatus: 42},
+		"negative warn-after": {ID: "a", Kind: KindWebsite, Name: "x", Address: "https://e.com", IntervalSeconds: 60, WarnAfterMS: -1},
 	}
 	for name, tgt := range bad {
 		t.Run(name, func(t *testing.T) {

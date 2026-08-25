@@ -219,6 +219,12 @@ func (r Renderer) Targets(w io.Writer, ts []protocol.Target) {
 		if !t.Enabled {
 			name += r.paint(" (paused)", dim)
 		}
+		if t.Contains != "" {
+			name += r.paint(" [contains]", dim)
+		}
+		if t.WarnAfterMS > 0 {
+			name += r.paint(fmt.Sprintf(" [warn>%s]", time.Duration(t.WarnAfterMS)*time.Millisecond), dim)
+		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", safe(t.ID), name, safe(string(t.Kind)), shortDuration(t.Interval()))
 	}
 	tw.Flush()

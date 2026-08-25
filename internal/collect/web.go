@@ -1,6 +1,7 @@
 package collect
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,10 +20,21 @@ import (
 )
 
 const (
-	webTimeout     = 10 * time.Second
-	maxRedirects   = 3
-	maxBodyDrain   = 64 * 1024 // cap so a huge response never gets buffered
-	certWarnWithin = 14 * 24 * time.Hour
+	webTimeout   = 10 * time.Second
+	maxRedirects = 3
+	// maxBodyReadBytes caps how much of a response body the collector will
+	// ever look at, whether draining a body it doesn't otherwise care
+	// about or checking one against Target.Contains. A monitor's job is to
+	// notice a broken site quickly and repeatedly, not to buffer whatever
+	// a misconfigured or hostile server decides to send back (a target is
+	// an address the operator supplied, but the server behind it answers
+	// with content the operator does not control). 256 KiB comfortably
+	// holds a defaced page's or a parked-domain placeholder's visible
+	// text, which sits near the top of the document, ahead of any large
+	// embedded scripts or images, while keeping memory bounded even when
+	// every website target is checked at once.
+	maxBodyReadBytes = 256 * 1024
+	certWarnWithin   = 14 * 24 * time.Hour
 )
 
 var errRedirectLimit = errors.New("redirect limit exceeded")
@@ -116,7 +128,17 @@ func (w *webCollector) Collect(ctx context.Context, t protocol.Target) protocol.
 		return s
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyDrain))
+
+	// The body is only actually buffered when a target asks for a content
+	// check; every other target still has its response drained (so the
+	// connection can be reused) without paying for an allocation it has
+	// no use for.
+	var bodyBuf bytes.Buffer
+	dest := io.Writer(io.Discard)
+	if t.Contains != "" {
+		dest = &bodyBuf
+	}
+	_, _ = io.Copy(dest, io.LimitReader(resp.Body, maxBodyReadBytes))
 
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		expiry := resp.TLS.PeerCertificates[0].NotAfter
@@ -133,14 +155,38 @@ func (w *webCollector) Collect(ctx context.Context, t protocol.Target) protocol.
 	case resp.StatusCode != expect:
 		s.State = protocol.StateDown
 		s.Error = fmt.Sprintf("status %d, expected %d", resp.StatusCode, expect)
+	case t.Contains != "" && !bodyContains(bodyBuf.Bytes(), t.Contains):
+		s.State = protocol.StateDown
+		s.Error = fmt.Sprintf("response body does not contain %q", t.Contains)
 	case s.CertExpiry != nil && time.Until(*s.CertExpiry) <= certWarnWithin:
 		s.State = protocol.StateWarning
 		s.Error = fmt.Sprintf("certificate expires %s", s.CertExpiry.Format(time.RFC3339))
+	case warnAfterExceeded(s.LatencyMS, t.WarnAfterMS):
+		s.State = protocol.StateWarning
+		s.Error = fmt.Sprintf("response took %.0fms, warn threshold is %dms", s.LatencyMS, t.WarnAfterMS)
 	default:
 		s.State = protocol.StateHealthy
 	}
 
 	return s
+}
+
+// bodyContains reports whether body contains want, case-insensitively. Case
+// is ignored because the assertion exists to catch missing or replaced
+// content, a blank page, a defaced site, a parked-domain placeholder, not to
+// police a site's capitalization; a check that broke every time a page's own
+// markup changed "Welcome" to "welcome" would just teach the operator to
+// ignore it.
+func bodyContains(body []byte, want string) bool {
+	return bytes.Contains(bytes.ToLower(body), bytes.ToLower([]byte(want)))
+}
+
+// warnAfterExceeded reports whether a response's latency has gone past a
+// configured warn-after threshold. A zero threshold means none is
+// configured, so it never trips. The comparison is strict: a response that
+// lands exactly on the threshold has not yet gone after it.
+func warnAfterExceeded(latencyMS float64, warnAfterMS int) bool {
+	return warnAfterMS > 0 && latencyMS > float64(warnAfterMS)
 }
 
 // sanitizeErr reduces a request error to a message safe to store and fit to

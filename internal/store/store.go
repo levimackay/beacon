@@ -169,6 +169,8 @@ func rankState(rank int64) protocol.State {
 // version table. Anything else is a real error.
 var migrations = []string{
 	`ALTER TABLE targets ADD COLUMN allow_private INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE targets ADD COLUMN contains_text TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE targets ADD COLUMN warn_after_ms INTEGER NOT NULL DEFAULT 0`,
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

@@ -84,6 +84,24 @@ func TestEmptySnapshotTellsYouWhatToDo(t *testing.T) {
 	}
 }
 
+func TestTargetsRenderConfiguredGuards(t *testing.T) {
+	var buf bytes.Buffer
+	Renderer{Now: fixedNow()}.Targets(&buf, []protocol.Target{
+		{ID: "web-1", Kind: protocol.KindWebsite, Name: "Portfolio", Address: "https://levimackay.com", IntervalSeconds: 60, Enabled: true, Contains: "Welcome", WarnAfterMS: 2000},
+		{ID: "web-2", Kind: protocol.KindWebsite, Name: "Plain", Address: "https://example.com", IntervalSeconds: 60, Enabled: true},
+	})
+	out := buf.String()
+	if !strings.Contains(out, "Portfolio") || !strings.Contains(out, "[contains]") {
+		t.Errorf("target with a body assertion should be marked [contains]:\n%s", out)
+	}
+	if !strings.Contains(out, "[warn>2s]") {
+		t.Errorf("target with a latency threshold should show it:\n%s", out)
+	}
+	if strings.Contains(out, "Plain [contains]") || strings.Contains(out, "Plain [warn") {
+		t.Errorf("a target without either field should show neither marker:\n%s", out)
+	}
+}
+
 func TestIncidentsRenderOngoingDistinctly(t *testing.T) {
 	now := fixedNow()
 	resolved := now.Add(-time.Hour)

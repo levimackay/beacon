@@ -30,6 +30,7 @@ Commands:
   services                               service targets only
   incidents [--since 24h] [--limit 50] [--target ID]
   add <url> --name NAME [--every 60s] [--expect 200] [--private]
+                                        [--contains TEXT] [--warn-after 2s]
   rm <id>
   diagnostics                            troubleshooting view
   version                                print the CLI version
@@ -198,6 +199,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, newClient
 		every := fs.String("every", "60s", "how often to check, as a Go duration (e.g. 30s, 5m); minimum 5s")
 		expect := fs.Int("expect", 0, "expected HTTP status code (default: any successful status)")
 		private := fs.Bool("private", false, "allow this target's address to resolve to a LAN, loopback, or Tailscale address")
+		contains := fs.String("contains", "", "fail the check (report down) if the response body does not contain this text")
+		warnAfter := fs.String("warn-after", "", "report warning, not down, when response latency exceeds this duration (e.g. 2s)")
 		if err := fs.Parse(cmdArgs[1:]); err != nil {
 			return 1
 		}
@@ -218,6 +221,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, newClient
 			fmt.Fprintf(stderr, "beacon: --every must be at least 5s, got %s\n", dur)
 			return 1
 		}
+		var warnAfterMS int
+		if *warnAfter != "" {
+			d, err := time.ParseDuration(*warnAfter)
+			if err != nil {
+				fmt.Fprintf(stderr, "beacon: --warn-after must be a duration like 2s or 500ms: %v\n", err)
+				return 1
+			}
+			if d <= 0 {
+				fmt.Fprintf(stderr, "beacon: --warn-after must be positive, got %s\n", d)
+				return 1
+			}
+			warnAfterMS = int(d.Milliseconds())
+		}
 		cl, ec, ok := getClient()
 		if !ok {
 			return ec
@@ -230,6 +246,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, newClient
 			ExpectStatus:    *expect,
 			Enabled:         true,
 			AllowPrivate:    *private,
+			Contains:        *contains,
+			WarnAfterMS:     warnAfterMS,
 		}
 		if err := cl.AddTarget(ctx, t); err != nil {
 			return handleErr(stderr, err)
