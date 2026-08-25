@@ -36,6 +36,8 @@ Built and tested:
   incident machine together on a timer.
 - The `beaconhub` binary, and installing it as a per-user launchd agent
   so monitoring survives quitting a terminal and restarts at login.
+- The macOS menu bar app and the WidgetKit widget (small, medium and
+  large), in `apps/macos`. See `apps/macos/README.md`.
 - The `beacon` CLI (`status`, `devices`, `websites`, `services`,
   `incidents`, `add`, `rm`, `diagnostics`, `version`).
 - First-run configuration: token generation, the support directory, and
@@ -43,7 +45,6 @@ Built and tested:
 
 Planned, and explicitly not built:
 
-- The macOS app, the WidgetKit widget and the menu bar app
 - The web dashboard
 - GitHub integration
 - Docker monitoring
@@ -106,6 +107,27 @@ Other commands: `beacon devices`, `beacon websites`, `beacon services`,
 Add `--json` to any command for the raw API payload instead of rendered
 text, or `--no-color` to turn off ANSI color (also respected via the
 `NO_COLOR` environment variable).
+
+## The Mac app and widget
+
+    ./scripts/install-macos.sh
+
+That builds, signs and installs `Beacon.app`, then launches it. Add the
+widget by right-clicking the desktop, choosing Edit Widgets, and searching
+for Beacon. macOS has no way to place a widget programmatically, so that
+last step is a gesture only you can make.
+
+The app lives in the menu bar and has no Dock icon. Its icon carries the
+overall state, so the answer to "is everything okay" is there without a
+click. Clicking opens a compact panel; the full window is the same
+information with room to breathe.
+
+Requires [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+(`brew install xcodegen`) and an Apple Development signing identity, which
+Xcode creates for you when you add your Apple ID under Settings, Accounts.
+The widget will not register without one: macOS requires a widget
+extension to be sandboxed and signed by a real team, and refuses silently
+when it is not.
 
 ### Keeping the hub running
 
