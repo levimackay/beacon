@@ -1,6 +1,6 @@
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
 /bin/
 /dist/
-*.db
-*.db-wal
-*.db-shm
-.DS_Store

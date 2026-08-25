@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/levimackay/beacon/internal/collect"
 	"github.com/levimackay/beacon/internal/protocol"
 )
 
@@ -63,7 +64,13 @@ func (s *server) handlePostTarget(w http.ResponseWriter, r *http.Request) {
 	if t.Kind == protocol.KindWebsite {
 		g := *s.deps.Guard
 		g.AllowPrivate = t.AllowPrivate
-		if err := g.CheckURL(t.Address); err != nil {
+		// A host that cannot be resolved right now is accepted: a site
+		// being unreachable is the condition the user is asking Beacon
+		// to watch for, so refusing to add it would be backwards. It is
+		// recorded and reported as down. Every probe still passes
+		// through the guard at dial time, so accepting the target
+		// grants it no reach it would not otherwise have.
+		if err := g.CheckURL(t.Address); err != nil && !errors.Is(err, collect.ErrUnresolvable) {
 			writeError(w, http.StatusBadRequest, "address rejected: "+err.Error())
 			return
 		}

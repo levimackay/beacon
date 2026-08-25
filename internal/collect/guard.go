@@ -31,6 +31,18 @@ var carrierGrade = netip.MustParsePrefix("100.64.0.0/10")
 // to it fails is unambiguous.
 var metadataAddr = netip.MustParseAddr("169.254.169.254")
 
+// ErrUnresolvable reports that a host could not be resolved at all, as
+// distinct from resolving to an address Beacon refuses to reach.
+//
+// The difference matters at the point a target is added. A monitoring tool
+// that refuses to accept a site because that site is currently down is
+// backwards: being down is the condition the user wants to be told about.
+// An unresolvable host is therefore accepted and reported as down, while a
+// host resolving into a forbidden range is refused outright. The dial-time
+// check still applies on every subsequent probe, so accepting the target
+// grants it nothing.
+var ErrUnresolvable = errors.New("host could not be resolved")
+
 // Guard rejects requests aimed at loopback, private, carrier-grade-NAT,
 // link-local, unique-local, unspecified, multicast or cloud-metadata
 // addresses, closing the SSRF hole a monitoring tool would otherwise hand an
@@ -103,10 +115,10 @@ func (g *Guard) CheckURL(raw string) error {
 	}
 	addrs, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
 	if err != nil {
-		return fmt.Errorf("resolve %s: %w", host, err)
+		return fmt.Errorf("%w: %s", ErrUnresolvable, host)
 	}
 	if len(addrs) == 0 {
-		return fmt.Errorf("host %s did not resolve", host)
+		return fmt.Errorf("%w: %s", ErrUnresolvable, host)
 	}
 	for _, a := range addrs {
 		if reason := g.blocked(a); reason != "" {
