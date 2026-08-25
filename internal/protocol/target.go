@@ -15,6 +15,12 @@ type Target struct {
 	IntervalSeconds int        `json:"intervalSeconds"`
 	ExpectStatus    int        `json:"expectStatus,omitempty"`
 	Enabled         bool       `json:"enabled"`
+	// AllowPrivate lets this target resolve to an address on the
+	// operator's own networks: LAN, loopback, or a Tailscale address.
+	// It is off by default so that adding a website target can never
+	// become a way to probe the machine Beacon runs on. It never
+	// permits the cloud metadata address.
+	AllowPrivate bool `json:"allowPrivate,omitempty"`
 }
 
 // Validate rejects targets that would be unsafe or nonsensical to schedule.
