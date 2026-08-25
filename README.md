@@ -374,6 +374,3 @@ branch protection rule for `main`). At minimum:
 - Require branches to be up to date before merging.
 - Do not allow force pushes to `main`.
 - Do not allow deletion of `main`.
-
-**Last updated:** 2026-08-25 08:04 PDT
-
