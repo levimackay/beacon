@@ -61,7 +61,7 @@ func sampleEntry(state: HealthState = .healthy, withIncident: Bool = false) -> B
         hub: HubInfo(version: "0.1.0", host: "Mac", os: "darwin 26.5", kernel: "25.5.0",
                      startedAt: now.addingTimeInterval(-8000), uptimeSeconds: 8000),
         counts: counts, targets: targets, openIncidents: incidents)
-    return BeaconEntry(date: now, snapshot: snapshot, age: 12, problem: nil)
+    return BeaconEntry(date: now, snapshot: snapshot, storedAt: now.addingTimeInterval(-12))
 }
 
 @main
@@ -79,8 +79,9 @@ struct PreviewMain {
 
             let ok = sampleEntry()
             let bad = sampleEntry(withIncident: true)
-            let stale = BeaconEntry(date: Date(), snapshot: ok.snapshot, age: 900,
-                                    problem: "Beacon is not running.")
+            let stale = BeaconEntry(date: Date(), snapshot: ok.snapshot,
+                                    storedAt: Date().addingTimeInterval(-900))
+            let unset = BeaconEntry(date: Date(), snapshot: nil, storedAt: nil)
 
             render(SmallWidgetView(entry: ok), size: small, to: "\(outDir)/small-healthy.png")
             render(SmallWidgetView(entry: bad), size: small, to: "\(outDir)/small-down.png")
@@ -89,5 +90,8 @@ struct PreviewMain {
             render(MediumWidgetView(entry: bad), size: medium, to: "\(outDir)/medium-down.png")
             render(LargeWidgetView(entry: ok), size: large, to: "\(outDir)/large-healthy.png")
             render(LargeWidgetView(entry: bad), size: large, to: "\(outDir)/large-down.png")
+            render(MediumWidgetView(entry: stale), size: medium, to: "\(outDir)/medium-stale.png")
+            render(LargeWidgetView(entry: stale), size: large, to: "\(outDir)/large-stale.png")
+            render(SmallWidgetView(entry: unset), size: small, to: "\(outDir)/small-unset.png")
     }
 }

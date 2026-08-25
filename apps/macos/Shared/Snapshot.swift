@@ -62,6 +62,22 @@ struct TargetStatus: Codable, Hashable, Sendable, Identifiable {
     var id: String { target.id }
 
     func metric(_ key: String) -> Double? { metrics?[key] }
+
+    /// The one number worth showing for this target in a list.
+    ///
+    /// A truncated phrase ("connection...") reads worse than the plain fact,
+    /// so an error too long for the space becomes DOWN; the full reason is in
+    /// the app. Hosts report load rather than latency, because the round trip
+    /// to a machine you are sampling locally says nothing about its health.
+    func reading(maxErrorLength: Int) -> String {
+        if let error, !error.isEmpty {
+            return error.count > maxErrorLength ? "DOWN" : error
+        }
+        if target.kind == .host {
+            return metric(MetricKey.cpu).map { "\(Int($0.rounded()))%" } ?? "ok"
+        }
+        return latencyMs > 0 ? Format.latency(latencyMs) : "no data"
+    }
 }
 
 struct Incident: Codable, Hashable, Sendable, Identifiable {

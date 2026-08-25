@@ -3,21 +3,33 @@ import WidgetKit
 
 struct BeaconProvider: TimelineProvider {
     func placeholder(in context: Context) -> BeaconEntry {
-        BeaconEntry(date: Date(), snapshot: nil, age: nil, problem: nil)
+        entry(at: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (BeaconEntry) -> Void) {
-        Task { completion(await load()) }
+        completion(entry(at: Date()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<BeaconEntry>) -> Void) {
-        Task {
-            let entry = await load()
-            // Refreshed often enough to be worth glancing at, rarely
-            // enough that WidgetKit keeps honouring the requests.
-            let next = Date().addingTimeInterval(entry.problem == nil ? 300 : 900)
-            completion(Timeline(entries: [entry], policy: .after(next)))
+        let now = Date()
+        let current = entry(at: now)
+        var entries = [current]
+
+        // WidgetKit renders one entry and leaves it up until the next one is
+        // due, so a widget with a single entry goes on asserting the data is
+        // current for minutes after the app has died. A second entry placed
+        // at the exact moment the cache expires costs nothing and makes the
+        // widget admit it the second it is true.
+        if let storedAt = current.storedAt, !current.isStale {
+            let expiry = storedAt.addingTimeInterval(CachedSnapshot.freshnessLimit + 1)
+            entries.append(entry(at: expiry))
         }
+
+        // Refreshed often enough to be worth glancing at, rarely enough that
+        // WidgetKit keeps honouring the requests. Nothing is arriving while
+        // the app is down, so back off rather than burning the budget.
+        let next = now.addingTimeInterval(current.isStale ? 900 : 300)
+        completion(Timeline(entries: entries, policy: .after(next)))
     }
 
     /// Reads the snapshot the app cached into the shared container.
@@ -28,16 +40,9 @@ struct BeaconProvider: TimelineProvider {
     /// of the one secret the whole security model rests on. The app polls;
     /// the widget reports what the app last saw, and says plainly how old
     /// that is.
-    private func load() async -> BeaconEntry {
-        guard let cached = SnapshotCache.read() else {
-            return BeaconEntry(date: Date(), snapshot: nil, age: nil,
-                               problem: "Open Beacon to start monitoring.")
-        }
-        return BeaconEntry(
-            date: Date(),
-            snapshot: cached.snapshot,
-            age: cached.age,
-            problem: cached.isStale ? "Beacon is not running." : nil)
+    private func entry(at date: Date) -> BeaconEntry {
+        let cached = SnapshotCache.read()
+        return BeaconEntry(date: date, snapshot: cached?.snapshot, storedAt: cached?.storedAt)
     }
 }
 

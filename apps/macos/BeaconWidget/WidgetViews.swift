@@ -4,10 +4,6 @@ import WidgetKit
 /// Shared reading of an entry, so all three sizes agree on what they are
 /// looking at rather than each recomputing it slightly differently.
 extension BeaconEntry {
-    var hostStatus: TargetStatus? {
-        snapshot?.targets(ofKind: .host).first
-    }
-
     /// Targets ordered so anything unhealthy is first. The widget exists to
     /// surface the exception, not to list inventory alphabetically.
     var ranked: [TargetStatus] {
@@ -16,19 +12,41 @@ extension BeaconEntry {
         }
     }
 
-    var services: [TargetStatus] {
-        ranked.filter { $0.target.kind != .host }
+    /// The machine given the detailed treatment: the worst one, not the
+    /// alphabetically first. If one of several machines is in trouble, that
+    /// is the one whose numbers are worth the space.
+    var hostStatus: TargetStatus? {
+        ranked.first { $0.target.kind == .host }
     }
 
-    var ageLabel: String {
-        guard let age else { return "no data" }
-        return isStale ? "\(Format.age(age)) old" : "\(Format.age(age)) ago"
+    /// Everything the detailed host panel does not already cover. Filtering
+    /// by kind would silently drop a second or third machine off the widget
+    /// entirely, which is the one thing a monitor must never do.
+    var others: [TargetStatus] {
+        ranked.filter { $0.id != hostStatus?.id }
     }
 
     var headline: String {
-        if problem != nil && snapshot == nil { return "NOT\nSET UP" }
+        if snapshot == nil { return "NOT\nSET UP" }
         if isStale { return "NO\nSIGNAL" }
         return displayState.display
+    }
+
+    /// One sentence covering everything the widget draws, for VoiceOver.
+    /// A glanceable widget read out element by element is a jumble of
+    /// numbers; the summary is the thing a person actually wanted.
+    var spoken: String {
+        guard let snapshot else { return "Beacon. Not set up yet." }
+        if isStale { return "Beacon. Status unknown, Beacon is not running." }
+        var parts = [displayState.headline]
+        let counts = snapshot.counts
+        if counts.critical > 0 { parts.append("\(counts.critical) down") }
+        if counts.warning > 0 { parts.append("\(counts.warning) needing attention") }
+        parts.append("\(counts.healthy) of \(counts.total) healthy")
+        if let incident = snapshot.incidents.first {
+            parts.append("\(incident.targetName), \(incident.summary)")
+        }
+        return "Beacon. " + parts.joined(separator: ". ") + "."
     }
 }
 
@@ -36,17 +54,27 @@ extension BeaconEntry {
 /// says what it is and how old its information is.
 private struct Chrome: View {
     var entry: BeaconEntry
-    var trailing: String?
 
     var body: some View {
         HStack(spacing: 5) {
             Micro("Beacon", color: Ink.muted)
             Spacer(minLength: 2)
-            if let trailing {
-                Micro(trailing, color: entry.isStale ? Ink.caution : Ink.faint)
-            }
+            AgeLabel(storedAt: entry.storedAt, stale: entry.isStale)
             StateDot(state: entry.displayState, size: 5)
         }
+    }
+}
+
+/// How long the oldest open incident has been running, counting up rather
+/// than frozen at whatever it read when the entry was built.
+private struct IncidentClock: View {
+    var incident: Incident
+    var size: CGFloat
+
+    var body: some View {
+        Text(incident.startedAt, style: .timer)
+            .font(.system(size: size, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Ink.alarm)
     }
 }
 
@@ -63,7 +91,7 @@ struct SmallWidgetView: View {
         // which crops the wordmark off the top and the footer off the
         // bottom instead of shrinking anything.
         VStack(alignment: .leading, spacing: 0) {
-            Chrome(entry: entry, trailing: entry.ageLabel)
+            Chrome(entry: entry)
 
             Text(entry.headline)
                 .font(.system(size: 22, weight: .heavy))
@@ -87,17 +115,26 @@ struct SmallWidgetView: View {
                 // dimmed rather than removed: the last known numbers are
                 // still useful, but they must not look live.
                 .opacity(entry.isStale ? 0.4 : 1)
-            } else {
-                Micro(entry.problem ?? "waiting for data", color: Ink.muted)
+            } else if entry.note == nil {
+                Micro("waiting for data", color: Ink.muted)
             }
 
             Spacer(minLength: 4)
 
-            HStack(spacing: 5) {
-                Micro("\(entry.ranked.count) watched")
-                Spacer(minLength: 2)
-                TargetTicks(states: entry.ranked.map(\.state), height: 8)
-                    .frame(width: 38)
+            // The footer carries the shape of the estate when there is
+            // nothing to explain, and the explanation when there is. Swapping
+            // rather than stacking keeps the column's height fixed.
+            if let note = entry.note {
+                Micro(note, color: Ink.caution)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                HStack(spacing: 5) {
+                    Micro("\(entry.ranked.count) watched")
+                    Spacer(minLength: 2)
+                    TargetTicks(states: entry.ranked.map(\.state), height: 8)
+                        .frame(width: 38)
+                }
             }
         }
     }
@@ -125,23 +162,24 @@ struct MediumWidgetView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
 
-                if let incident = entry.snapshot?.incidents.first {
+                if let note = entry.note {
+                    Micro(note, color: Ink.caution)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let incident = entry.snapshot?.incidents.first {
                     VStack(alignment: .leading, spacing: 1) {
                         Micro("down for", color: Ink.faint)
-                        Text(Format.duration(incident.duration(now: Date())))
-                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Ink.alarm)
+                        IncidentClock(incident: incident, size: 15)
                     }
                 } else if let host = entry.hostStatus {
                     VStack(spacing: 5) {
                         Meter(label: "cpu", value: host.metric(MetricKey.cpu) ?? 0)
                         Meter(label: "mem", value: host.metric(MetricKey.memory) ?? 0)
                     }
-                    .opacity(entry.isStale ? 0.4 : 1)
                 }
 
                 Spacer(minLength: 4)
-                Micro(entry.ageLabel, color: entry.isStale ? Ink.caution : Ink.faint)
+                AgeLabel(storedAt: entry.storedAt, stale: entry.isStale)
             }
             .frame(width: 118, alignment: .leading)
 
@@ -155,6 +193,7 @@ struct MediumWidgetView: View {
                 }
                 Spacer(minLength: 0)
             }
+            .opacity(entry.isStale ? 0.4 : 1)
         }
     }
 }
@@ -164,23 +203,23 @@ struct MediumWidgetView: View {
 struct LargeWidgetView: View {
     var entry: BeaconEntry
 
-    /// The slowest service, used to scale the latency bars. Scaling against
-    /// the slowest rather than a fixed ceiling means the bars stay
-    /// informative whether everything answers in 20ms or 2s.
+    /// The slowest thing being watched, used to scale the latency bars.
+    /// Scaling against the slowest rather than a fixed ceiling means the
+    /// bars stay informative whether everything answers in 20ms or 2s.
     private var latencyCeiling: Double {
-        max(1, entry.services.map(\.latencyMs).max() ?? 1)
+        max(1, entry.others.map(\.latencyMs).max() ?? 1)
     }
 
-    /// An incident card costs roughly two service rows worth of height, so
-    /// the list gives that space back rather than pushing the footer off
-    /// the bottom of the widget.
-    private var serviceLimit: Int {
+    /// An incident card costs roughly two rows worth of height, so the list
+    /// gives that space back rather than pushing the footer off the bottom
+    /// of the widget.
+    private var rowLimit: Int {
         (entry.snapshot?.incidents.isEmpty ?? true) ? 6 : 4
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Chrome(entry: entry, trailing: entry.ageLabel)
+            Chrome(entry: entry)
                 .padding(.bottom, 8)
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
@@ -195,18 +234,25 @@ struct LargeWidgetView: View {
                     Text("\(counts.healthy)/\(counts.total)")
                         .font(.system(size: 15, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Ink.muted)
+                        // As much a claim about right now as the meters are.
+                        .opacity(entry.isStale ? 0.4 : 1)
                 }
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, entry.note == nil ? 10 : 3)
+
+            // "NO SIGNAL" says the widget cannot see; the note says why, which
+            // is the difference between a puzzle and an instruction.
+            if let note = entry.note {
+                Micro(note, color: Ink.caution)
+                    .padding(.bottom, 10)
+            }
 
             if let incident = entry.snapshot?.incidents.first {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Micro("incident #\(incident.id)", color: Ink.alarm)
                         Spacer()
-                        Text(Format.duration(incident.duration(now: Date())))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Ink.alarm)
+                        IncidentClock(incident: incident, size: 11)
                     }
                     Text(incident.targetName)
                         .font(.system(size: 14, weight: .semibold))
@@ -224,46 +270,47 @@ struct LargeWidgetView: View {
             }
 
             if let host = entry.hostStatus {
-                Micro(host.target.name, color: Ink.muted)
-                    .padding(.bottom, 7)
-                    .opacity(entry.isStale ? 0.4 : 1)
-                HStack(alignment: .top, spacing: 10) {
-                    Meter(label: "cpu", value: host.metric(MetricKey.cpu) ?? 0)
-                    Meter(label: "mem", value: host.metric(MetricKey.memory) ?? 0)
-                    Meter(label: "ssd", value: host.metric(MetricKey.disk) ?? 0)
-                }
-                .opacity(entry.isStale ? 0.4 : 1)
-                .padding(.bottom, 8)
+                Group {
+                    Micro(host.target.name, color: Ink.muted)
+                        .padding(.bottom, 7)
+                    HStack(alignment: .top, spacing: 10) {
+                        Meter(label: "cpu", value: host.metric(MetricKey.cpu) ?? 0)
+                        Meter(label: "mem", value: host.metric(MetricKey.memory) ?? 0)
+                        Meter(label: "ssd", value: host.metric(MetricKey.disk) ?? 0)
+                    }
+                    .padding(.bottom, 8)
 
-                HStack(spacing: 0) {
-                    if let temp = host.metric(MetricKey.temperature) {
-                        Stat(label: "temp", value: "\(Int(temp))°")
-                        Spacer(minLength: 0)
+                    HStack(spacing: 0) {
+                        if let temp = host.metric(MetricKey.temperature) {
+                            Stat(label: "temp", value: "\(Int(temp))°")
+                            Spacer(minLength: 0)
+                        }
+                        if let load = host.metric(MetricKey.load1) {
+                            Stat(label: "load", value: String(format: "%.2f", load))
+                            Spacer(minLength: 0)
+                        }
+                        if let up = host.metric(MetricKey.uptime) {
+                            Stat(label: "uptime", value: Format.age(up))
+                            Spacer(minLength: 0)
+                        }
+                        Stat(label: "watched", value: "\(entry.ranked.count)")
                     }
-                    if let load = host.metric(MetricKey.load1) {
-                        Stat(label: "load", value: String(format: "%.2f", load))
-                        Spacer(minLength: 0)
-                    }
-                    if let up = host.metric(MetricKey.uptime) {
-                        Stat(label: "uptime", value: Format.age(up))
-                        Spacer(minLength: 0)
-                    }
-                    Stat(label: "watched", value: "\(entry.ranked.count)")
+                    .padding(.bottom, 10)
                 }
                 .opacity(entry.isStale ? 0.4 : 1)
-                .padding(.bottom, 10)
             }
 
             Hairline()
-            Micro("services", color: Ink.muted)
+            Micro("targets", color: Ink.muted)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(entry.services.prefix(serviceLimit)) { item in
-                    ServiceDetailRow(status: item, ceiling: latencyCeiling)
+                ForEach(entry.others.prefix(rowLimit)) { item in
+                    TargetDetailRow(status: item, ceiling: latencyCeiling)
                 }
             }
+            .opacity(entry.isStale ? 0.4 : 1)
 
             Spacer(minLength: 2)
 
@@ -278,11 +325,11 @@ struct LargeWidgetView: View {
     }
 }
 
-/// A service on the large widget: name, its number, and a bar showing how
-/// it compares with everything else being watched. The bar is what turns a
-/// list of numbers into something readable at a glance, and it fills the
-/// row's width with information rather than whitespace.
-private struct ServiceDetailRow: View {
+/// A target on the large widget: name, its number, and a bar showing how it
+/// compares with everything else being watched. The bar is what turns a list
+/// of numbers into something readable at a glance, and it fills the row's
+/// width with information rather than whitespace.
+private struct TargetDetailRow: View {
     var status: TargetStatus
     var ceiling: Double
 
@@ -300,16 +347,21 @@ private struct ServiceDetailRow: View {
                 if let days = status.metric(MetricKey.certDaysLeft), status.error == nil {
                     Micro("\(Int(days))d cert")
                 }
-                Text(valueLabel)
+                Text(status.reading(maxErrorLength: 16))
                     .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(status.error == nil ? Ink.paper : status.state.tint)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Ink.track).frame(height: 2)
-                    Capsule()
-                        .fill(status.error == nil ? Ink.paper.opacity(0.75) : status.state.tint)
-                        .frame(width: max(3, geo.size.width * fraction), height: 2)
+                    // A target with no latency to report (a machine, say)
+                    // keeps the empty track so every row is the same height,
+                    // but draws no fill it cannot justify.
+                    if let fraction {
+                        Capsule()
+                            .fill(status.error == nil ? Ink.paper.opacity(0.75) : status.state.tint)
+                            .frame(width: max(3, geo.size.width * fraction), height: 2)
+                    }
                 }
             }
             .frame(height: 2)
@@ -317,16 +369,10 @@ private struct ServiceDetailRow: View {
         .padding(.vertical, 5)
     }
 
-    private var fraction: Double {
-        guard status.error == nil, ceiling > 0 else { return 1 }
+    private var fraction: Double? {
+        if status.error != nil { return 1 }
+        guard status.latencyMs > 0, ceiling > 0 else { return nil }
         return min(1, max(0.04, status.latencyMs / ceiling))
-    }
-
-    private var valueLabel: String {
-        if let error = status.error, !error.isEmpty {
-            return error.count > 16 ? "DOWN" : error
-        }
-        return status.latencyMs > 0 ? Format.latency(status.latencyMs) : "no data"
     }
 }
 
@@ -362,26 +408,10 @@ struct ServiceRow: View {
             if showsCert, let days = status.metric(MetricKey.certDaysLeft), status.error == nil {
                 Micro("\(Int(days))d")
             }
-            Text(value)
+            Text(status.reading(maxErrorLength: 10))
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(status.error == nil ? Ink.muted : status.state.tint)
                 .lineLimit(1)
-        }
-    }
-
-    private var value: String {
-        if let error = status.error, !error.isEmpty {
-            // A truncated phrase ("connection...") reads worse than the
-            // plain fact. The full reason is on the large widget and in
-            // the app; here the useful signal is that it is not up.
-            return error.count > 10 ? "DOWN" : error
-        }
-        switch status.target.kind {
-        case .host:
-            if let cpu = status.metric(MetricKey.cpu) { return "\(Int(cpu))%" }
-            return "ok"
-        case .website, .service:
-            return status.latencyMs > 0 ? Format.latency(status.latencyMs) : "no data"
         }
     }
 }
@@ -392,6 +422,13 @@ struct BeaconWidgetView: View {
     var entry: BeaconEntry
 
     var body: some View {
+        layout
+            // Read out as one sentence rather than as a run of loose numbers.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(entry.spoken)
+    }
+
+    @ViewBuilder private var layout: some View {
         switch family {
         case .systemSmall: SmallWidgetView(entry: entry)
         case .systemLarge: LargeWidgetView(entry: entry)

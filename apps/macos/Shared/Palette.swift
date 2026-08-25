@@ -56,6 +56,16 @@ struct StateDot: View {
     }
 }
 
+extension Text {
+    /// The micro label's typography, applied to a Text rather than a View so
+    /// a date-styled, self-updating Text can wear it too.
+    func micro(_ color: Color = Ink.faint, size: CGFloat = 8.5) -> Text {
+        font(.system(size: size, weight: .semibold, design: .monospaced))
+            .tracking(1.1)
+            .foregroundStyle(color)
+    }
+}
+
 /// Small caps monospace, used for labels that should read as instrumentation
 /// rather than prose.
 struct Micro: View {
@@ -70,10 +80,31 @@ struct Micro: View {
     }
 
     var body: some View {
-        Text(text.uppercased())
-            .font(.system(size: size, weight: .semibold, design: .monospaced))
-            .tracking(1.1)
-            .foregroundStyle(color)
+        Text(text.uppercased()).micro(color, size: size)
+    }
+}
+
+/// How old the reading is, counting up on its own.
+///
+/// A widget re-renders only when its timeline says so, so an age formatted at
+/// render time still reads "12s ago" five minutes later. Presenting stale data
+/// as current is the one failure mode a monitor must not have, and a
+/// date-styled Text keeps counting without costing a timeline reload.
+struct AgeLabel: View {
+    var storedAt: Date?
+    var stale: Bool
+
+    private var color: Color { stale ? Ink.caution : Ink.faint }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let storedAt {
+                Text(storedAt, style: .timer).micro(color)
+                Micro(stale ? "old" : "ago", color: color)
+            } else {
+                Micro("no data", color: color)
+            }
+        }
     }
 }
 
@@ -131,8 +162,11 @@ struct TargetTicks: View {
     var height: CGFloat = 14
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(states.enumerated()), id: \.offset) { _, state in
+        // Past a dozen the ticks are thinner than the gaps between them and
+        // stop reading as anything; at fifteen the row overflows its frame
+        // outright. The count printed beside them still carries the total.
+        HStack(spacing: 2) {
+            ForEach(Array(states.prefix(12).enumerated()), id: \.offset) { _, state in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(state == .healthy ? Ink.paper.opacity(0.85) : state.tint)
                     .frame(height: height)
