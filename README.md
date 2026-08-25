@@ -32,7 +32,11 @@ Built and tested:
   site that is merely slow.
 - Threshold evaluation and a flap-suppressing incident state machine: a
   state change needs two consecutive confirming samples before it opens
-  or closes an incident.
+  or escalates an incident, and three before it closes one (closing is
+  held to a higher bar on purpose; see `docs/design.md`).
+- Network outage detection: when every website target fails at once while
+  a local host or service check keeps succeeding, Beacon raises one
+  incident against the network rather than one against every site.
 - The HTTP API, bearer auth, split request and authentication rate
   limits, and the scheduler that ties the collectors, the store and the
   incident machine together on a timer.

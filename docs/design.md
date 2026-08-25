@@ -108,10 +108,106 @@ upgrade path if 60s ever feels slow.
 
 ## Incident model
 
-Per target, a state machine over `healthy`, `warning`, `down`, `unknown`. A
-transition requires N consecutive confirming samples (default 2) to suppress
-flapping. Entering a non-healthy state opens an incident row; returning to
-healthy closes it and records the duration.
+Per target, a state machine over `healthy`, `warning`, `down`, `unknown`.
+Entering a non-healthy state opens an incident row; returning to healthy
+closes it and records the duration.
+
+### Flap suppression: this was an open question, now resolved
+
+Earlier drafts of this document flagged flap suppression as unresolved: a
+target bouncing between up and down would open and close an incident on
+every sample, which is a useless incident log on its own and would be a
+notification storm once alerting exists. The resolution, implemented in
+`internal/incident.Machine`:
+
+A transition is only confirmed after it has been observed for N consecutive
+samples, and opening uses a different N than closing.
+
+- **Opening or escalating an incident needs 2 consecutive samples.** This
+  absorbs a single bad reading (a dropped packet, a timeout past the
+  threshold, a five-second CPU spike) without logging it, while still
+  catching a real problem within a couple of check intervals.
+- **Closing an incident needs 3 consecutive healthy samples.** Closing is
+  deliberately held to a higher bar than opening, because the two guard
+  against different failure modes and one shared number cannot serve both.
+  A target that is still genuinely broken, a server mid-restart, a site
+  failing most requests but serving one lucky 200, often produces exactly
+  one good sample in the middle of a real outage. Resolving on that sample,
+  only to reopen on the very next bad one, is the same flapping this
+  mechanism exists to suppress, just relocated to the recovery boundary
+  instead of removed. The cost of the higher bar is a few extra seconds of
+  showing "down" after a genuine fix, which is a small price next to a
+  resolved/reopened/resolved churn in the incident log, and, once alerting
+  ships, the identical churn in notifications.
+
+The one exception: a brand-new target's first-ever confirmation always uses
+the opening threshold, even when the destination state is healthy, because
+there is no already-open incident at risk of premature closure to protect
+against. Without that exception, every freshly added, already-healthy
+target would sit at "unknown" for an extra sample for no benefit.
+
+Both thresholds are fields on `Machine`, not command-line flags or config:
+the defaults are chosen with reasoning above, and a knob only earns a place
+in the operator-facing surface once someone has an actual, specific reason
+to move it. A caller with such a reason (an unusually long check interval,
+say) can still set the fields directly after construction.
+
+### Network outage detection: "the network is down, not your sites"
+
+A single-machine hub has a specific false-positive mode that per-target flap
+suppression alone does not fix: when the Mac running `beaconhub` loses its
+own uplink, every website target fails at once, and without anything
+smarter than one state machine per target, Beacon opens an incident against
+every site, blaming each of them for a problem none of them has.
+
+The hub already runs a mix of checks that need the network (website checks)
+and checks that never leave the machine (host metrics via `gopsutil`,
+service liveness via `launchctl`/systemd D-Bus). That split is the signal:
+if every website target is confirmed down at the same time that a host or
+service target is confirmed healthy, the healthy local check proves the
+collector process and the machine itself are working, which leaves "this
+machine cannot currently reach the internet" as a far better explanation
+than "every independently hosted site happened to break at once." The
+scheduler (`internal/scheduler/network_outage.go`) checks this on every
+confirmed transition and, when it holds, opens one incident against a
+synthetic "Network" target instead of one against every site, folding away
+any per-site incident that already opened before the full picture was in.
+
+This has to be designed so it never explains away a real outage that
+happens to span several sites, which is the actual tradeoff:
+
+- It requires **every** enabled website target to be down, not most of
+  them. One target still reachable is itself proof the network path out of
+  the machine works, which rules out a network explanation immediately and
+  correctly leaves the down targets to raise their own incidents. A real
+  outage affecting, say, 4 of 5 configured sites is not a network verdict
+  under this rule; it is 4 real incidents, which is what it should be.
+- It requires an actually-**confirmed-healthy** local target as the
+  control, not merely the absence of a local failure. No host or service
+  target configured, or one that is itself down, means there is nothing to
+  compare the website failures against, so the function reports no outage
+  and every site raises its own incident as usual. The hub seeds a host
+  target for itself on first run, so this control is normally always
+  present, but the rule does not assume it is.
+- It requires **at least two** website targets. With exactly one, "the site
+  is down" and "the network is down" produce an identical observation, and
+  there is no second witness available to break the tie, so Beacon does not
+  guess and raises the site's own incident.
+
+The chosen bias, throughout, is that missing the chance to merge several
+incidents into one costs a slightly noisier incident log; treating a real
+outage as a network hiccup costs the user's trust in the tool the next time
+it says "just your network," which is far more expensive. Every condition
+above is written to fail toward raising real incidents, never toward
+suppressing them, whenever the evidence is ambiguous.
+
+Once the outage clears, any website target still confirmed down gets its
+own incident at that point, backdated to the moment of recovery rather than
+to whenever it actually started failing: while the network explanation
+held, Beacon had no way to distinguish "down because of the network the
+whole time" from "down for its own reasons partway through," and it would
+rather under-report an incident's duration than invent a start time it
+cannot support.
 
 Alerting rules: one notification on open, one on recovery, nothing in between.
 A cooldown suppresses repeat notifications for the same target. `unknown`

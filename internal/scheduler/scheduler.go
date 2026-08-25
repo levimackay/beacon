@@ -297,12 +297,35 @@ func (s *Scheduler) applyTransition(ctx context.Context, t protocol.Target, tr *
 	if tr == nil {
 		return
 	}
+
+	// Every confirmed transition can change whether "the network is down"
+	// still explains the current picture (a site recovering, a host going
+	// unhealthy and losing its status as the control), so this is
+	// recomputed and reconciled on every transition rather than cached.
+	// See network_outage.go for the detection and its tradeoffs.
+	targets, err := s.deps.Store.Targets(ctx)
+	if err != nil {
+		s.logger.Error("scheduler: list targets for network outage check", "err", err)
+		targets = nil
+	}
+	outage := isNetworkOutage(targets, s.deps.Machine.Current)
+	s.reconcileNetworkOutage(ctx, targets, outage, tr.At)
+
 	if tr.To == protocol.StateHealthy {
 		if err := s.deps.Store.ResolveIncident(ctx, t.ID, tr.At); err != nil {
 			s.logger.Error("scheduler: resolve incident", "target", t.ID, "err", err)
 		}
 		return
 	}
+
+	if t.Kind == protocol.KindWebsite && outage {
+		// This site's own down state is already covered by the network
+		// incident reconcileNetworkOutage just opened above: raising a
+		// second, per-site incident here would be exactly the false-alarm
+		// pile-up this check exists to prevent.
+		return
+	}
+
 	inc := protocol.Incident{
 		TargetID:   t.ID,
 		TargetName: t.Name,
