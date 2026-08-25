@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 /// Starts polling as soon as the process launches.
@@ -14,6 +15,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         poller.start()
+        registerAsLoginItem()
+    }
+
+    /// Registers Beacon to launch at login.
+    ///
+    /// The widget shows what the app last fetched, so an app that is not
+    /// running means a widget that goes stale within two minutes and then
+    /// reports "unknown". A monitor you have to remember to start is one
+    /// you will eventually forget to start, on the morning it mattered.
+    ///
+    /// Failure here is not worth interrupting the user over: the app still
+    /// works, it just will not come back by itself, so it is logged and
+    /// left alone.
+    private func registerAsLoginItem() {
+        guard SMAppService.mainApp.status != .enabled else { return }
+        do {
+            try SMAppService.mainApp.register()
+        } catch {
+            NSLog("Beacon: could not register as a login item: \(error.localizedDescription)")
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
