@@ -225,7 +225,7 @@ func TestCheckOnce_TwoFailuresOpenExactlyOneIncident(t *testing.T) {
 	}
 }
 
-func TestCheckOnce_TwoSuccessesResolveIncident(t *testing.T) {
+func TestCheckOnce_ThreeSuccessesResolveIncident(t *testing.T) {
 	fc := newFakeClock()
 	st := newFakeStore()
 	state := protocol.StateDown
@@ -241,11 +241,16 @@ func TestCheckOnce_TwoSuccessesResolveIncident(t *testing.T) {
 		t.Fatalf("setup: want exactly one open incident, got %+v", got)
 	}
 
+	// Closing needs one more confirmation than opening did (3, not 2): see
+	// incident.Machine's CloseConfirmations doc for why. The first two
+	// healthy checks must not resolve anything yet.
 	state = protocol.StateHealthy
-	fc.Advance(time.Minute)
-	sched.CheckOnce(context.Background(), tgt)
-	if got := st.allIncidents(); len(got) != 1 || !got[0].Open() {
-		t.Fatalf("after 1 success: incident should still be open, got %+v", got)
+	for i := 0; i < 2; i++ {
+		fc.Advance(time.Minute)
+		sched.CheckOnce(context.Background(), tgt)
+		if got := st.allIncidents(); len(got) != 1 || !got[0].Open() {
+			t.Fatalf("after %d success(es): incident should still be open, got %+v", i+1, got)
+		}
 	}
 
 	fc.Advance(time.Minute)
