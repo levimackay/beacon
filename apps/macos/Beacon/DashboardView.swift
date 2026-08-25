@@ -49,6 +49,14 @@ struct DashboardView: View {
     /// for" for a moment, not just wherever the scroll happened to land.
     private func goTo(_ targetID: String?, proxy: ScrollViewProxy) {
         guard let targetID else { return }
+        // Not every incident belongs to a row in these lists. The hub files
+        // a network outage against a synthetic target that has no row to
+        // scroll to, so a notification about one names an id nothing here
+        // carries. Scrolling to an id the list does not contain is not
+        // defined to do anything useful, and the open incidents section is
+        // already the first thing in the window, which is exactly where
+        // that notification wanted to send you anyway.
+        guard poller.snapshot?.allTargets.contains(where: { $0.id == targetID }) == true else { return }
         withAnimation { proxy.scrollTo(targetID, anchor: .center) }
         highlightedID = targetID
         Task {
