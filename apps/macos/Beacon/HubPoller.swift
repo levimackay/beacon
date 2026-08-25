@@ -28,6 +28,7 @@ final class HubPoller {
 
     private var task: Task<Void, Never>?
     private var isActive = false
+    private let notifier = IncidentNotifier()
 
     var snapshot: Snapshot? {
         switch status {
@@ -85,6 +86,7 @@ final class HubPoller {
             lastUpdate = Date()
             SnapshotCache.write(snapshot)
             WidgetCenter.shared.reloadAllTimelines()
+            notifier.handle(snapshot)
         } catch {
             let message = (error as? HubError)?.errorDescription ?? error.localizedDescription
             status = .failing(message, last: snapshot)

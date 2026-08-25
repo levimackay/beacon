@@ -6,30 +6,55 @@ import SwiftUI
 /// you, and that is the glance's problem to fix, not the window's.
 struct DashboardView: View {
     var poller: HubPoller
+    var deepLink = DeepLinkRouter()
+
+    /// Which row a widget or notification tap named, if any, drawn with a
+    /// brief highlight so the click has something to land on rather than
+    /// just scrolling the list and leaving the user to find it themselves.
+    @State private var highlightedID: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                overview
-                if let snapshot = poller.snapshot {
-                    if !snapshot.incidents.isEmpty {
-                        section("Open incidents") {
-                            ForEach(snapshot.incidents) { incident in
-                                IncidentCard(incident: incident)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    overview
+                    if let snapshot = poller.snapshot {
+                        if !snapshot.incidents.isEmpty {
+                            section("Open incidents") {
+                                ForEach(snapshot.incidents) { incident in
+                                    IncidentCard(incident: incident)
+                                }
                             }
                         }
+                        section("Devices") { rows(snapshot.targets(ofKind: .host)) }
+                        section("Websites") { rows(snapshot.targets(ofKind: .website)) }
+                        section("Services") { rows(snapshot.targets(ofKind: .service)) }
                     }
-                    section("Devices") { rows(snapshot.targets(ofKind: .host)) }
-                    section("Websites") { rows(snapshot.targets(ofKind: .website)) }
-                    section("Services") { rows(snapshot.targets(ofKind: .service)) }
                 }
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(of: deepLink.request, initial: true) { _, request in
+                goTo(request?.targetID, proxy: proxy)
+            }
         }
         .background(.background)
         .onAppear { poller.setActive(true) }
         .onDisappear { poller.setActive(false) }
+    }
+
+    /// Scrolls to and briefly highlights one row. The highlight clears
+    /// itself on a timer rather than on the next tap elsewhere, so a target
+    /// that was named by a link is still visibly "the one you came here
+    /// for" for a moment, not just wherever the scroll happened to land.
+    private func goTo(_ targetID: String?, proxy: ScrollViewProxy) {
+        guard let targetID else { return }
+        withAnimation { proxy.scrollTo(targetID, anchor: .center) }
+        highlightedID = targetID
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if highlightedID == targetID { highlightedID = nil }
+        }
     }
 
     private var overview: some View {
@@ -77,7 +102,8 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     if index > 0 { Divider() }
-                    DashboardRow(status: item)
+                    DashboardRow(status: item, isHighlighted: item.id == highlightedID)
+                        .id(item.id)
                 }
             }
             .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
@@ -87,6 +113,7 @@ struct DashboardView: View {
 
 struct DashboardRow: View {
     var status: TargetStatus
+    var isHighlighted: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -121,6 +148,11 @@ struct DashboardRow: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 10)
+        // Monochrome like the rest of this window's chrome: a tint strong
+        // enough to say "this one" without introducing a colour that would
+        // otherwise only ever mean trouble elsewhere in Beacon.
+        .background(isHighlighted ? Color.primary.opacity(0.08) : .clear)
+        .animation(.easeOut(duration: 0.3), value: isHighlighted)
     }
 
     private var metrics: [(label: String, value: String)] {

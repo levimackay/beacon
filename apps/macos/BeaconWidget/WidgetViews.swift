@@ -426,6 +426,12 @@ struct BeaconWidgetView: View {
             // Read out as one sentence rather than as a run of loose numbers.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(entry.spoken)
+            // A tap anywhere on the widget opens Beacon. This is the one
+            // widgetURL for the whole thing rather than a Link per row:
+            // WidgetKit views are a static snapshot with no real
+            // interaction, and the widget names which target is wrong via
+            // colour and text, not via which pixel was tapped.
+            .widgetURL(DeepLink.open())
     }
 
     @ViewBuilder private var layout: some View {
