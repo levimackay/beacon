@@ -53,10 +53,10 @@ func newRateLimiter(perMinute, burst int) *rateLimiter {
 // stream of distinct principals (or forged tokens) doesn't grow the map
 // forever.
 //
-// ponytail: the sweep is an O(n) scan over every bucket, done inline under
-// the map lock. With one real principal today that's free. If tailnet
-// identity brings many concurrent principals, move the sweep to a
-// background ticker so it stops sharing the hot lock.
+// The sweep is an O(n) scan over every bucket, done inline under the map
+// lock. With one principal today that costs nothing. If tailnet identity
+// ever brings many concurrent principals, move it to a background ticker
+// so it stops sharing the hot lock.
 func (l *rateLimiter) bucketFor(key string) *tokenBucket {
 	l.mu.Lock()
 	defer l.mu.Unlock()

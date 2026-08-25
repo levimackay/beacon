@@ -1,7 +1,6 @@
-# Beacon — Design
+# Beacon design
 
 Date: 2026-08-24
-Status: approved (architecture), pending implementation plan
 
 ## What Beacon is
 
@@ -30,8 +29,7 @@ migrations the user has to run.
 
 ### The hub runs on the Mac first, the Pi later
 
-The Pi is physically unavailable for roughly a week. The hub therefore ships
-first as a macOS user-level launchd agent (`~/Library/LaunchAgents`, no root,
+The hub ships first as a macOS user-level launchd agent (`~/Library/LaunchAgents`, no root,
 no sudo), installed by Beacon.app on first run.
 
 Accepted limitation while the hub lives on the Mac: monitoring pauses when the

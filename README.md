@@ -13,10 +13,8 @@ tailnet. It is not a multi-tenant monitoring platform.
 ## Status
 
 This section is deliberately plain about what runs today versus what is
-still a design decision on paper. Full detail lives in
-[`docs/superpowers/specs/2026-08-24-beacon-design.md`](docs/superpowers/specs/2026-08-24-beacon-design.md);
-the build order is in
-[`docs/superpowers/plans/2026-08-24-beacon-hub-and-cli.md`](docs/superpowers/plans/2026-08-24-beacon-hub-and-cli.md).
+still a design decision on paper. The architecture and the reasoning behind
+it are in [`docs/design.md`](docs/design.md).
 
 Built and tested:
 

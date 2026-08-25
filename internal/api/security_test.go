@@ -27,7 +27,7 @@ import (
 // that already landed in the store is never recorded.
 //
 // This matters because "every mutating request writes an audit row" is a
-// stated security property (see docs/superpowers/specs — Security section),
+// stated security property (see docs/design.md, Security),
 // and it is not true for any handler that can panic after its write: a
 // caller can cause state to change with no corresponding trail.
 func TestSecurity_PanicAfterMutationStillAudits(t *testing.T) {
