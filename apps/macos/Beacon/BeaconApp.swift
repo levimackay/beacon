@@ -1,6 +1,17 @@
+import CoreServices // keyDirectObject: no Swift-native equivalent exists for it.
 import ServiceManagement
 import SwiftUI
 import UserNotifications
+
+/// The Carbon symbols for the "open URL" Apple Event (kInternetEventClass,
+/// kAEGetURLEvent) were dropped from the SDK's Swift-visible headers even
+/// though the event itself is alive and well - LaunchServices still sends
+/// exactly this event to open a registered URL scheme. 'GURL' for both is
+/// not a guess: it is the FourCharCode Internet Config defined for this
+/// event decades ago and every URL-handling app still keys off, headers or
+/// not.
+private let openURLEventClass: AEEventClass = 0x4755_524C // 'GURL'
+private let openURLEventID: AEEventID = 0x4755_524C // 'GURL'
 
 /// Starts polling as soon as the process launches.
 ///
@@ -11,13 +22,89 @@ import UserNotifications
 /// nothing to show. The work has to begin at launch, independently of
 /// whether any view exists yet.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let poller = HubPoller()
+    let deepLink = DeepLinkRouter()
+    private var dashboardWindow: NSWindow?
+
+    /// Registered here rather than in `applicationDidFinishLaunching`: a
+    /// `beacon://` tap that launches Beacon cold delivers its Apple Event
+    /// before `didFinishLaunching` runs, and an event with no handler
+    /// installed yet is dropped, not queued for later.
+    ///
+    /// This replaces SwiftUI's `Window` + `.handlesExternalEvents` +
+    /// `.onOpenURL`, which is what the widget click was built on before and
+    /// which turned out not to work against the real installed app: that
+    /// stack only promises to fire once some Window scene's content view
+    /// exists, and for an already-running LSUIElement process whose window
+    /// has never opened this run, verified behavior was no window
+    /// appearing at all, not a mispositioned one. `NSAppleEventManager` is
+    /// the actual mechanism LaunchServices and `NSWorkspace.open` deliver a
+    /// custom-scheme URL through underneath that SwiftUI abstraction, so
+    /// handling it here does not depend on any scene ever having been
+    /// opened.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURL(_:withReplyEvent:)),
+            forEventClass: openURLEventClass,
+            andEventID: openURLEventID)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         poller.start()
         registerAsLoginItem()
+    }
+
+    @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: string) else {
+            NSLog("Beacon: got a GetURL event with no usable URL: \(event)")
+            return
+        }
+        deepLink.handle(url)
+        presentDashboard()
+    }
+
+    /// Builds and shows the dashboard window by hand rather than asking a
+    /// SwiftUI `Window` scene to do it. That scene is what silently failed
+    /// in the first place, so trusting it again for presentation - even
+    /// with URL delivery fixed above - would leave the same failure mode
+    /// sitting underneath. One instance is kept and reused rather than
+    /// built fresh per call, so a second tap while the window is already
+    /// open re-fronts and re-highlights it instead of stacking a duplicate.
+    private func presentDashboard() {
+        if dashboardWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false)
+            window.title = "Beacon"
+            window.center()
+            // Otherwise closing the window deallocates it, and the next
+            // beacon:// tap would rebuild DashboardView from scratch,
+            // losing whatever poll state it was showing for no reason.
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.contentView = NSHostingView(rootView: DashboardView(poller: poller, deepLink: deepLink))
+            dashboardWindow = window
+        }
+        // An LSUIElement process is background-only by policy, and a
+        // background-only app's window can be created and even ordered
+        // front without ever taking key status or showing up for Cmd-Tab -
+        // it just sits behind whatever the user was already looking at,
+        // which is indistinguishable from the click having done nothing.
+        // Restored to .accessory in windowWillClose, so Beacon goes back to
+        // having no Dock icon once the dashboard is dismissed again.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        dashboardWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 
     /// Tapping a delivered notification should do what tapping the widget
@@ -26,14 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// yourself has only done half the job.
     ///
     /// This re-opens Beacon through the same `beacon://` URL the widget
-    /// uses, via NSWorkspace, rather than reaching for SwiftUI's
-    /// `openWindow` action directly: `openWindow` can create the window
-    /// without actually giving it a real screen position until the app is
-    /// separately activated, which for an LSUIElement process with no
-    /// window yet on screen reads as the notification having done nothing.
-    /// Routing through the URL means there is exactly one place -
-    /// `BeaconApp.onOpenURL` - that knows how to make the window actually
-    /// appear, instead of two that could disagree.
+    /// uses, via NSWorkspace, rather than calling `presentDashboard`
+    /// directly: routing through the URL means there is exactly one place
+    /// - `handleGetURL` above - that knows how to make the window actually
+    /// appear, instead of two call paths that could disagree about it.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -84,8 +167,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 @main
 struct BeaconApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var deepLink = DeepLinkRouter()
 
+    // No Window scene for the dashboard: AppDelegate.presentDashboard
+    // manages that NSWindow by hand, because the SwiftUI scene equivalent
+    // (Window + .handlesExternalEvents + .onOpenURL) is the thing that
+    // did not work against the real installed build. Two systems for
+    // showing the same window would just be two places this could break.
     var body: some Scene {
         MenuBarExtra {
             MenuBarPanel(poller: delegate.poller)
@@ -98,38 +185,6 @@ struct BeaconApp: App {
                 .symbolRenderingMode(.hierarchical)
         }
         .menuBarExtraStyle(.window)
-
-        Window("Beacon", id: "main") {
-            DashboardView(poller: delegate.poller, deepLink: deepLink)
-                // A View modifier, not a Scene one - SwiftUI only exposes
-                // onOpenURL on views, so it only fires once this window's
-                // content actually exists. `handlesExternalEvents` below is
-                // what makes that happen for a widget tap that arrives
-                // while the window has never been opened.
-                .onOpenURL { url in
-                    deepLink.handle(url)
-                    // SwiftUI has no public API to pop open a
-                    // MenuBarExtra's own dropdown from outside a click on
-                    // the status item, so "open the panel" from here means
-                    // this window instead - the same information "with
-                    // room to breathe" per DashboardView's own doc
-                    // comment. Activating is required, not optional: an
-                    // LSUIElement process has no Dock icon, and a widget or
-                    // notification tap launches it with no window on
-                    // screen and nothing to click afterward, so without
-                    // this the window exists but never gets a real frame
-                    // or comes forward - the click reads as having done
-                    // nothing at all.
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-        }
-        .defaultSize(width: 720, height: 520)
-        // Tells SwiftUI this is the scene to open (or wake) for an
-        // external event such as a `beacon://` URL, including when the
-        // window has never been opened this run. Without it, onOpenURL
-        // above never fires for a cold widget tap: there is no window yet
-        // whose content could receive it.
-        .handlesExternalEvents(matching: ["*"])
     }
 
     private var iconName: String {

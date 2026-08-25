@@ -45,13 +45,22 @@ final class HubPoller {
 
     func start() {
         guard task == nil else { return }
-        // Show whatever the last run left behind straight away, so opening
-        // the panel never begins with an empty box.
-        if let cached = SnapshotCache.read() {
-            status = .live(cached.snapshot)
-            lastUpdate = cached.storedAt
-        }
         task = Task { [weak self] in
+            // Resolving the shared container can mean an XPC round trip to
+            // containermanagerd, and that used to happen synchronously,
+            // right here, before the loop below ever got going. Apple
+            // Events, the menu bar, and everything else on the main thread
+            // waits behind that call while it runs - a daemon that is ever
+            // slow to answer does not just delay the first snapshot, it
+            // freezes the app. Detached so a slow read costs this poll
+            // loop a moment, not the whole process.
+            let cached = await Task.detached(priority: .userInitiated) { SnapshotCache.read() }.value
+            if let cached {
+                // Show whatever the last run left behind straight away, so
+                // opening the panel never begins with an empty box.
+                self?.status = .live(cached.snapshot)
+                self?.lastUpdate = cached.storedAt
+            }
             while !Task.isCancelled {
                 await self?.refresh()
                 let interval = await self?.currentInterval ?? 60
