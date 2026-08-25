@@ -80,12 +80,12 @@ func isNetworkOutage(targets []protocol.Target, current func(targetID string) pr
 // reconcileNetworkOutage keeps the synthetic network incident in sync with
 // outage: opening (or keeping open) the one network incident and folding
 // away any per-site incidents it now explains, or, once the outage clears,
-// opening the incident for any website that is still confirmed down for
-// its own reasons.
+// forgetting the confirmed state of any website still marked down so its
+// next real observation starts a fresh, honest confirmation.
 //
-// The fold-away on the way in exists because targets don't all confirm
-// down in the same instant: with two sites on independent check intervals,
-// the first to confirm opens its own incident normally, since outage isn't
+// The fold-away on the way in exists because targets don't all confirm down
+// in the same instant: with two sites on independent check intervals, the
+// first to confirm opens its own incident normally, since outage isn't
 // true yet with only one site down. Once the second confirms and outage
 // becomes true, leaving that first incident open would be exactly the
 // manufactured, misattributed incident this whole check exists to prevent,
@@ -95,26 +95,60 @@ func isNetworkOutage(targets []protocol.Target, current func(targetID string) pr
 // for a website in Warning (a certificate expiring, say, not a failure)
 // would already have kept outage false, so every open website incident
 // reachable from this branch is a Down incident being folded, never a
-// different kind of problem being silently erased.
+// different kind of problem being silently erased. It checks whether the
+// network incident is already open before doing any of this, so a network
+// outage that persists across many later transitions (other targets still
+// ticking, host metrics wobbling) does the fold-away store writes once per
+// outage, not once per transition.
 //
-// The backfill on the way out exists for the same underlying reason in
-// reverse: a website's down transition is never given its own incident
-// while outage is true, so if that website is still down once the network
-// explanation stops applying, it never otherwise gets an incident of its
-// own, because the state machine only emits a Transition on a change, and
-// this target's change to Down already happened and was consumed.
-// OpenIncident is a no-op for a target that already has one open, so
-// running this check on every reconciliation costs nothing on the vastly
-// more common case where nothing was ever suppressed.
+// Symmetrically, the cleanup on the way out (resolving the network incident
+// and forgetting each website's confirmed state) only runs when a network
+// incident was actually open to clean up. Without that guard, this would
+// also run on the far more common case of outage simply never having been
+// true, for example the first website to go down while its siblings
+// haven't been checked yet: that target's Current() is Down too, and
+// forgetting it there would erase the very confirmation this call is in
+// the middle of processing, before its own incident ever gets a chance to
+// open. Checking the store for whether the network incident actually
+// exists, rather than caching that fact in memory, also means a hub
+// restart mid-outage reconciles correctly from what's on disk instead of
+// from an assumption that resets to "no outage" on every process start.
 //
-// The backfilled incident's start time is the moment of this reconciliation,
-// not whenever the site actually first failed: while the network explanation
-// held, Beacon had no way to tell "down because of the network the whole
-// time" from "down for its own reasons partway through," and it would rather
-// under-report an incident's duration than invent a start time it cannot
-// support.
+// The reason the way out is a Forget rather than a backfill for the
+// websites still marked down: Current() being Down does not mean the site
+// is still genuinely broken. It also, and on a real recovery almost
+// always, means the site simply has not been asked anything since the
+// network came back, because targets tick on independent intervals.
+// Opening an incident on that basis manufactures a false one for every
+// target slower to be re-checked than whichever target happened to trigger
+// this reconciliation, which is the exact pile-up this feature exists to
+// prevent, just moved from the outage edge to the recovery edge. Forgetting
+// resets the target to StateUnknown instead, so its next real observation
+// goes through the ordinary path with no special case: if it is still
+// genuinely down, it confirms Down from Unknown in OpenConfirmations
+// samples and opens its own incident with its own summary; if it has
+// actually recovered, it confirms Healthy instead and opens nothing.
+// Either way the incident, if any, starts when the target is actually
+// observed to be down, not at a guessed moment this function cannot
+// support evidence for.
 func (s *Scheduler) reconcileNetworkOutage(ctx context.Context, targets []protocol.Target, outage bool, at time.Time) {
+	open, err := s.deps.Store.OpenIncidents(ctx)
+	if err != nil {
+		s.logger.Error("scheduler: list open incidents for network outage reconciliation", "err", err)
+		return
+	}
+	networkOpen := false
+	for _, in := range open {
+		if in.TargetID == networkOutageTargetID {
+			networkOpen = true
+			break
+		}
+	}
+
 	if outage {
+		if networkOpen {
+			return
+		}
 		inc := protocol.Incident{
 			TargetID:   networkOutageTargetID,
 			TargetName: networkOutageTargetName,
@@ -136,32 +170,16 @@ func (s *Scheduler) reconcileNetworkOutage(ctx context.Context, targets []protoc
 		return
 	}
 
+	if !networkOpen {
+		return
+	}
+
 	if err := s.deps.Store.ResolveIncident(ctx, networkOutageTargetID, at); err != nil {
 		s.logger.Error("scheduler: resolve network outage incident", "err", err)
 	}
-
-	var samples map[string]protocol.Sample
 	for _, wt := range targets {
-		if wt.Kind != protocol.KindWebsite || s.deps.Machine.Current(wt.ID) != protocol.StateDown {
-			continue
-		}
-		if samples == nil {
-			var err error
-			samples, err = s.deps.Store.LatestSamples(ctx)
-			if err != nil {
-				s.logger.Error("scheduler: latest samples for network-outage backfill", "err", err)
-				samples = map[string]protocol.Sample{}
-			}
-		}
-		inc := protocol.Incident{
-			TargetID:   wt.ID,
-			TargetName: wt.Name,
-			State:      protocol.StateDown,
-			StartedAt:  at,
-			Summary:    samples[wt.ID].Error,
-		}
-		if _, err := s.deps.Store.OpenIncident(ctx, inc); err != nil {
-			s.logger.Error("scheduler: open incident after network recovery", "target", wt.ID, "err", err)
+		if wt.Kind == protocol.KindWebsite && s.deps.Machine.Current(wt.ID) == protocol.StateDown {
+			s.deps.Machine.Forget(wt.ID)
 		}
 	}
 }

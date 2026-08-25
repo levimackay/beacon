@@ -176,9 +176,12 @@ func TestCheckOnce_NetworkOutage_NoLocalTargetNeverSuppressed(t *testing.T) {
 }
 
 // Once the network recovers, a website that is still genuinely down (not
-// just caught up in the outage) must get its own incident: the outage
-// explanation stops covering it the moment it stops being universally true.
-func TestCheckOnce_NetworkOutage_RecoveryBackfillsStillDownSite(t *testing.T) {
+// just caught up in the outage) must get its own incident, but only once
+// it has actually been re-sampled and confirmed down again: Current() still
+// reading Down the instant the outage clears does not mean the site is
+// broken, it usually just means nothing has asked it anything yet, since
+// targets tick on independent intervals.
+func TestCheckOnce_NetworkOutage_StillDownSiteGetsItsOwnIncidentOnceReSampled(t *testing.T) {
 	fc := newFakeClock()
 	host := healthyTarget("host-1", protocol.KindHost)
 	web1 := healthyTarget("web-1", protocol.KindWebsite)
@@ -209,9 +212,11 @@ func TestCheckOnce_NetworkOutage_RecoveryBackfillsStillDownSite(t *testing.T) {
 		t.Fatalf("want an open network incident before recovery, got %+v", st.allIncidents())
 	}
 
-	// web-1 recovers, but web-2 is genuinely still broken on its own.
-	// Recovering web-1 needs 3 confirmations (closing an incident), and
-	// only after that does the network condition stop holding.
+	// web-1 recovers. web-2 has not been re-sampled at all yet: it is still
+	// "confirmed down" purely because nobody has asked it anything since
+	// the network came back. Recovering web-1 needs 3 confirmations
+	// (closing an incident), and only after that does the network
+	// condition stop holding.
 	states["web-1"] = protocol.StateHealthy
 	for i := 0; i < 3; i++ {
 		sched.CheckOnce(context.Background(), web1)
@@ -220,6 +225,23 @@ func TestCheckOnce_NetworkOutage_RecoveryBackfillsStillDownSite(t *testing.T) {
 	if in := network(); in != nil && in.Open() {
 		t.Fatalf("network incident should be resolved once not every site is down, got %+v", *in)
 	}
+	for _, in := range st.allIncidents() {
+		if in.TargetID == "web-2" {
+			t.Fatalf("web-2 got an incident before ever being re-sampled after recovery: %+v", in)
+		}
+	}
+
+	// Now web-2 is actually checked and turns out to be genuinely still
+	// broken. Its confirmed state was forgotten when the outage cleared, so
+	// this needs its own OpenConfirmations (2), the same as any fresh
+	// target going from unknown to down.
+	sched.CheckOnce(context.Background(), web2)
+	for _, in := range st.allIncidents() {
+		if in.TargetID == "web-2" {
+			t.Fatalf("web-2 got an incident after only 1 confirmation: %+v", in)
+		}
+	}
+	sched.CheckOnce(context.Background(), web2)
 
 	found := false
 	for _, in := range st.allIncidents() {
@@ -228,7 +250,67 @@ func TestCheckOnce_NetworkOutage_RecoveryBackfillsStillDownSite(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("web-2 is still down and should have gotten its own incident once the network recovered, got %+v", st.allIncidents())
+		t.Fatalf("web-2 is genuinely still down and should have its own incident after being re-sampled, got %+v", st.allIncidents())
+	}
+}
+
+// The realistic shape of a recovery with mixed check intervals: several
+// sites come back, but on different ticks, and some have not been asked
+// anything at all by the time the first one confirms healthy. That must
+// never manufacture incidents for the ones still waiting on their own
+// timer; it must wait for them to actually be checked.
+func TestCheckOnce_NetworkOutage_StaggeredRecoveryRaisesNoFalseIncidents(t *testing.T) {
+	fc := newFakeClock()
+	host := healthyTarget("host-1", protocol.KindHost)
+	web1 := healthyTarget("web-1", protocol.KindWebsite)
+	web2 := healthyTarget("web-2", protocol.KindWebsite)
+	web3 := healthyTarget("web-3", protocol.KindWebsite)
+	st := newFakeStore(host, web1, web2, web3)
+
+	states := map[string]protocol.State{
+		"web-1": protocol.StateDown,
+		"web-2": protocol.StateDown,
+		"web-3": protocol.StateDown,
+	}
+	hostC := newFakeCollector(func(protocol.Target) protocol.Sample { return protocol.Sample{State: protocol.StateHealthy} })
+	webC := newFakeCollector(stateFor(states))
+	sched := scheduler.New(newDeps(st, fc, map[protocol.TargetKind]collect.Collector{
+		protocol.KindHost:    hostC,
+		protocol.KindWebsite: webC,
+	}))
+
+	confirmHealthy(t, sched, host)
+	confirmDown(t, sched, web1)
+	confirmDown(t, sched, web2)
+	confirmDown(t, sched, web3)
+
+	// The uplink returns. Only web-1 happens to get re-checked (a shorter
+	// interval, say); web-2 and web-3 sit on longer timers and are not
+	// asked anything at all in this window. That is the normal shape of a
+	// multi-site recovery, not an edge case.
+	states["web-1"] = protocol.StateHealthy
+	for i := 0; i < 3; i++ {
+		sched.CheckOnce(context.Background(), web1)
+	}
+
+	// web-2 and web-3 may well have a resolved incident on record already,
+	// folded into the network incident back when all three first confirmed
+	// down; that is expected history, not a false alarm. What must not
+	// happen is either of them having a new, open incident before ever
+	// being re-sampled.
+	for _, in := range st.allIncidents() {
+		if (in.TargetID == "web-2" || in.TargetID == "web-3") && in.Open() {
+			t.Fatalf("a site not yet re-sampled after recovery has an open incident: %+v", in)
+		}
+	}
+	open := 0
+	for _, in := range st.allIncidents() {
+		if in.Open() {
+			open++
+		}
+	}
+	if open != 0 {
+		t.Fatalf("open incidents after a staggered recovery (only web-1 re-checked) = %d, want 0", open)
 	}
 }
 
