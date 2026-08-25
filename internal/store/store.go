@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/levimackay/beacon/internal/clock"
@@ -128,6 +129,11 @@ func Open(path string, c clock.Clock) (Store, error) {
 		return nil, fmt.Errorf("store: apply schema: %w", err)
 	}
 
+	if err := migrate(context.Background(), db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &sqlStore{db: db, clock: c}, nil
 }
 
@@ -149,4 +155,30 @@ func rankState(rank int64) protocol.State {
 	default:
 		return protocol.StateHealthy
 	}
+}
+
+// migrations are applied after the base schema, in order, to bring a
+// database created by an older build up to date. CREATE TABLE IF NOT EXISTS
+// does nothing to a table that already exists, so a column added later
+// needs an explicit ALTER or it silently will not be there: values written
+// to it are dropped and read back as their zero value, which for a security
+// flag means a permission the user granted quietly stops applying.
+//
+// Each statement is expected to fail with "duplicate column name" once it
+// has already been applied, which is how this stays idempotent without a
+// version table. Anything else is a real error.
+var migrations = []string{
+	`ALTER TABLE targets ADD COLUMN allow_private INTEGER NOT NULL DEFAULT 0`,
+}
+
+func migrate(ctx context.Context, db *sql.DB) error {
+	for _, stmt := range migrations {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
+			return fmt.Errorf("store: migrate: %w", err)
+		}
+	}
+	return nil
 }

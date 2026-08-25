@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS targets (
     address          TEXT NOT NULL,
     interval_seconds INTEGER NOT NULL,
     expect_status    INTEGER NOT NULL DEFAULT 0,
-    enabled          INTEGER NOT NULL DEFAULT 1
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    allow_private    INTEGER NOT NULL DEFAULT 0
 );
 
 -- One row per (target, metric) reading. bucket is 0 for raw samples, 300 for

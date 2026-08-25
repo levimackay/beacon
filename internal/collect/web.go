@@ -2,11 +2,16 @@ package collect
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/levimackay/beacon/internal/clock"
@@ -135,10 +140,19 @@ func (w *webCollector) Collect(ctx context.Context, t protocol.Target) protocol.
 	return s
 }
 
-// sanitizeErr reduces a request error to a message safe to store and show:
-// no full request URL (which may carry a query string), and a plain phrase
-// for the common cases instead of Go's wrapped-error prose.
+// sanitizeErr reduces a request error to a message safe to store and fit to
+// show a person: no full request URL (which may carry a query string in it),
+// and a plain phrase rather than Go's wrapped-error prose.
+//
+// This is the line the user reads when something is broken, often the only
+// one they read, so "connection refused" is worth the mapping over
+// "Get \"https://x/y?token=..\": dial tcp 10.0.0.1:443: connect: connection
+// refused".
 func sanitizeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+
 	var uerr *url.Error
 	if errors.As(err, &uerr) {
 		if uerr.Timeout() {
@@ -149,5 +163,55 @@ func sanitizeErr(err error) string {
 		}
 		return sanitizeErr(uerr.Err)
 	}
+
+	// The guard's own refusals are already written for a person.
+	if errors.Is(err, ErrUnresolvable) {
+		return err.Error()
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		if dnsErr.IsNotFound {
+			return "host could not be resolved"
+		}
+		return "DNS lookup failed"
+	}
+
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return "TLS certificate could not be verified"
+	}
+	var hostErr x509.HostnameError
+	if errors.As(err, &hostErr) {
+		return "TLS certificate does not match the hostname"
+	}
+	var authErr x509.UnknownAuthorityError
+	if errors.As(err, &authErr) {
+		return "TLS certificate is not from a trusted authority"
+	}
+
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return "connection refused"
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return "connection reset"
+	}
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
+		return "host unreachable"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return "connection timeout"
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "the server closed the connection"
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Err != nil {
+		// An OpError carries the address in its prose; keep only the
+		// innermost cause.
+		return sanitizeErr(opErr.Err)
+	}
+
 	return err.Error()
 }

@@ -22,8 +22,14 @@ import (
 )
 
 // refreshInterval is how often Run re-reads the target list from the store
-// to start/stop per-target goroutines.
-const refreshInterval = 30 * time.Second
+// to start, stop and restart per-target goroutines.
+//
+// It is deliberately short. It is also the delay a user sees between adding
+// a target and that target showing anything at all, and "I added my site
+// and Beacon showed nothing for half a minute" reads as broken. Re-reading
+// a table of a few dozen rows from a local SQLite file is far cheaper than
+// that impression.
+const refreshInterval = 5 * time.Second
 
 // rollupInterval is how often Store.Rollup runs.
 const rollupInterval = time.Hour
