@@ -25,7 +25,11 @@ Built and tested:
   temperature where the platform exposes it), built on `gopsutil`, so it
   runs on macOS and Linux without any hand-written `/proc` parsing.
 - A website collector: HTTP status, response time and TLS certificate
-  expiry, behind the SSRF guard described in Security model below.
+  expiry, behind the SSRF guard described in Security model below. A
+  target can add an expected body substring, so a 200 response with a
+  blank, defaced, or parked-domain page is no longer reported healthy,
+  and a latency threshold that reports warning rather than down for a
+  site that is merely slow.
 - Threshold evaluation and a flap-suppressing incident state machine: a
   state change needs two consecutive confirming samples before it opens
   or closes an incident.
@@ -95,6 +99,12 @@ is nothing else to configure. `beacon status` is also what running
 Add a website to watch:
 
     ./bin/beacon add https://example.com --name "Example" --every 60s --expect 200
+
+`--contains TEXT` additionally requires that text to appear somewhere in
+the response body, so a 200 that comes back blank or defaced is reported
+down instead of healthy. `--warn-after 2s` reports warning rather than
+down when a response is slower than that, instead of leaving a merely
+slow site indistinguishable from a healthy one. Both are optional.
 
 A site that is currently unreachable can still be added: being down is
 the condition you are asking Beacon to watch for, so it is accepted and
