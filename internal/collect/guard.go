@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"time"
 )
 
 // uniqueLocal is the IPv6 fc00::/7 unique-local range (RFC 4193). netip has
@@ -96,12 +97,25 @@ func (g *Guard) blocked(addr netip.Addr) string {
 	return ""
 }
 
+// resolveTimeout bounds a single name lookup. A caller that supplies no
+// deadline of its own still gets one: an unanswered lookup is a normal
+// failure mode (an expired domain, a partitioned network, a misconfigured
+// internal resolver) and must not be able to park a goroutine forever.
+const resolveTimeout = 5 * time.Second
+
 // CheckURL validates a target URL before any network activity: scheme must
 // be http or https, and every address the host resolves to must pass the
-// range check. This is a pre-flight check only — DialContext repeats the
+// range check. This is a pre-flight check only: DialContext repeats the
 // address check at dial time, because DNS can change between CheckURL and
 // the actual connection (DNS rebinding).
-func (g *Guard) CheckURL(raw string) error {
+//
+// It takes a context because it performs a name lookup. Resolving with a
+// background context instead would put the lookup outside the reach of the
+// caller's cancellation: the scheduler runs one goroutine per target and
+// cancels that goroutine's context when the target is deleted or the hub
+// shuts down, and a lookup that ignored it would keep the goroutine alive
+// past both, blocking shutdown indefinitely.
+func (g *Guard) CheckURL(ctx context.Context, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse url: %w", err)
@@ -113,7 +127,10 @@ func (g *Guard) CheckURL(raw string) error {
 	if host == "" {
 		return errors.New("url has no host")
 	}
-	addrs, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
+	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+	defer cancel()
+
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrUnresolvable, host)
 	}
@@ -143,7 +160,9 @@ func (g *Guard) DialContext(ctx context.Context, network, addr string) (net.Conn
 		// literal — resolution happens here, at dial time, which is what
 		// closes the DNS-rebinding window: the IP checked below is the
 		// exact IP dialed immediately after, not a name checked earlier.
-		ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		lookupCtx, cancel := context.WithTimeout(ctx, resolveTimeout)
+		defer cancel()
+		ips, lookupErr := net.DefaultResolver.LookupNetIP(lookupCtx, "ip", host)
 		if lookupErr != nil || len(ips) == 0 {
 			return nil, fmt.Errorf("resolve %s: %w", host, lookupErr)
 		}

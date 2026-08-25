@@ -21,6 +21,42 @@ const (
 	red    = "\x1b[31m"
 )
 
+// safe strips control characters from a string before it is written to a
+// terminal.
+//
+// Target names, incident summaries and collector errors are attacker-
+// influenceable: anything that can reach the API can choose them, and a
+// monitored server chooses part of what ends up in an error. Writing them
+// raw would let an escape sequence run in the reader's terminal: OSC 52
+// writes the clipboard, other sequences rewrite the title bar or overwrite
+// lines already printed, so the text a person sees need not be the text
+// Beacon emitted. Colour codes this package adds itself are applied after
+// this point and are unaffected.
+func safe(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			// Tabs drive tabwriter's column alignment, so a value
+			// containing one could shift every column on the row.
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// C0 controls, including ESC, CR and NUL.
+			continue
+		case r >= 0x80 && r <= 0x9f:
+			// C1 controls, reachable as single code points.
+			continue
+		case r == '\u2028' || r == '\u2029':
+			// Unicode line separators.
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // Renderer writes human-readable Beacon output.
 type Renderer struct {
 	Color bool
@@ -91,7 +127,7 @@ func (r Renderer) Status(w io.Writer, s protocol.Snapshot) {
 		fmt.Fprintf(w, "  %s\n", r.paint(group.label, dim))
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, it := range items {
-			fmt.Fprintf(tw, "  %s %s\t%s\n", r.glyph(it.State), it.Target.Name, r.detail(it))
+			fmt.Fprintf(tw, "  %s %s\t%s\n", r.glyph(it.State), safe(it.Target.Name), r.detail(it))
 		}
 		tw.Flush()
 		fmt.Fprintln(w)
@@ -102,8 +138,8 @@ func (r Renderer) Status(w io.Writer, s protocol.Snapshot) {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, in := range s.OpenIncidents {
 			fmt.Fprintf(tw, "  %s #%d %s\tfor %s\t%s\n",
-				r.glyph(in.State), in.ID, in.TargetName,
-				shortDuration(in.Duration(r.Now)), in.Summary)
+				r.glyph(in.State), in.ID, safe(in.TargetName),
+				shortDuration(in.Duration(r.Now)), safe(in.Summary))
 		}
 		tw.Flush()
 		fmt.Fprintln(w)
@@ -116,7 +152,7 @@ func (r Renderer) Status(w io.Writer, s protocol.Snapshot) {
 // that kind of target, and nothing else.
 func (r Renderer) detail(t protocol.TargetStatus) string {
 	if t.Error != "" {
-		return r.paint(t.Error, r.attrFor(t.State))
+		return r.paint(safe(t.Error), r.attrFor(t.State))
 	}
 	var parts []string
 	switch t.Target.Kind {
@@ -179,11 +215,11 @@ func (r Renderer) Targets(w io.Writer, ts []protocol.Target) {
 	fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n",
 		r.paint("ID", dim), r.paint("NAME", dim), r.paint("KIND", dim), r.paint("EVERY", dim))
 	for _, t := range ts {
-		name := t.Name
+		name := safe(t.Name)
 		if !t.Enabled {
 			name += r.paint(" (paused)", dim)
 		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", t.ID, name, t.Kind, shortDuration(t.Interval()))
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", safe(t.ID), name, safe(string(t.Kind)), shortDuration(t.Interval()))
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
@@ -204,7 +240,7 @@ func (r Renderer) Incidents(w io.Writer, in []protocol.Incident) {
 			dur = r.paint("ongoing "+dur, r.attrFor(i.State))
 		}
 		fmt.Fprintf(tw, "  %s #%d\t%s\t%s\t%s\t%s\n",
-			r.glyph(i.State), i.ID, i.TargetName, when, dur, i.Summary)
+			r.glyph(i.State), i.ID, safe(i.TargetName), when, dur, safe(i.Summary))
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
@@ -220,14 +256,14 @@ func (r Renderer) Diagnostics(w io.Writer, d protocol.Diagnostics) {
 	}
 	fmt.Fprintf(w, "\n  %s\n\n", r.paint("Beacon Diagnostics", bold))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "  Hub\t%s\t%s\n", ok(true), d.Hub.Version)
+	fmt.Fprintf(tw, "  Hub\t%s\t%s\n", ok(true), safe(d.Hub.Version))
 	fmt.Fprintf(tw, "  Scheduler\t%s\tlast tick %s\n", ok(d.SchedulerHealthy), ago(r.Now, d.LastTick))
 	fmt.Fprintf(tw, "  Database\t%s\t%s, %d raw / %d 5m / %d 1h samples\n",
 		ok(d.Store.SizeBytes > 0), humanBytes(d.Store.SizeBytes),
 		d.Store.RawSamples, d.Store.Bucket5m, d.Store.Bucket1h)
-	fmt.Fprintf(tw, "  Tailscale\t%s\t%s\n", ok(d.TailscaleState == "running"), d.TailscaleState)
+	fmt.Fprintf(tw, "  Tailscale\t%s\t%s\n", ok(d.TailscaleState == "running"), safe(d.TailscaleState))
 	fmt.Fprintf(tw, "  API latency\t%s\t%.0fms\n", ok(d.APILatencyMS < 250), d.APILatencyMS)
-	fmt.Fprintf(tw, "  Host\t\t%s %s (%s)\n", d.Hub.OS, d.Hub.Kernel, d.Hub.Host)
+	fmt.Fprintf(tw, "  Host\t\t%s %s (%s)\n", safe(d.Hub.OS), safe(d.Hub.Kernel), safe(d.Hub.Host))
 	fmt.Fprintf(tw, "  Hub uptime\t\t%s\n", shortDuration(time.Duration(d.Hub.UptimeSeconds)*time.Second))
 	tw.Flush()
 	fmt.Fprintln(w)

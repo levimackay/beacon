@@ -34,7 +34,7 @@ func TestAllowPrivateNeverReachesCloudMetadata(t *testing.T) {
 	if reason := g.blocked(netip.MustParseAddr("169.254.169.254")); reason == "" {
 		t.Fatal("AllowPrivate exposed the cloud metadata address")
 	}
-	if err := g.CheckURL("http://169.254.169.254/latest/meta-data/"); err == nil {
+	if err := g.CheckURL(context.Background(), "http://169.254.169.254/latest/meta-data/"); err == nil {
 		t.Fatal("CheckURL allowed the metadata endpoint under AllowPrivate")
 	}
 	if _, err := g.DialContext(context.Background(), "tcp", "169.254.169.254:80"); err == nil {
@@ -60,7 +60,7 @@ func TestGuardUnmapsIPv4MappedAddresses(t *testing.T) {
 }
 
 func TestGuardRejectionNamesTheReasonWithoutLeakingTheTarget(t *testing.T) {
-	err := NewGuard().CheckURL("http://10.1.2.3/admin?token=secret-value")
+	err := NewGuard().CheckURL(context.Background(), "http://10.1.2.3/admin?token=secret-value")
 	if err == nil {
 		t.Fatal("private address was allowed")
 	}

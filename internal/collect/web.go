@@ -44,7 +44,10 @@ func newGuardedClient(g *Guard) *guardedClient {
 				if len(via) > maxRedirects {
 					return errRedirectLimit
 				}
-				return g.CheckURL(req.URL.String())
+				// The redirected request carries the original
+				// request's context, so a cancelled probe
+				// cancels this lookup too.
+				return g.CheckURL(req.Context(), req.URL.String())
 			},
 		},
 	}
@@ -91,7 +94,7 @@ func (w *webCollector) Collect(ctx context.Context, t protocol.Target) protocol.
 
 	gc := w.clientFor(t)
 
-	if err := gc.guard.CheckURL(t.Address); err != nil {
+	if err := gc.guard.CheckURL(ctx, t.Address); err != nil {
 		s.State = protocol.StateDown
 		s.Error = err.Error()
 		return s

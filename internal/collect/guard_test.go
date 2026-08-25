@@ -31,7 +31,7 @@ func TestGuard_CheckURL(t *testing.T) {
 	g := NewGuard()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := g.CheckURL(tc.url)
+			err := g.CheckURL(context.Background(), tc.url)
 			if tc.wantErr && err == nil {
 				t.Fatalf("CheckURL(%q): want error, got nil", tc.url)
 			}
@@ -62,7 +62,7 @@ func TestGuard_RejectsByResolvedIPNotHostname(t *testing.T) {
 	defer restore()
 
 	const host = "totally-innocuous-name.example.internal"
-	err := NewGuard().CheckURL("http://" + host + "/")
+	err := NewGuard().CheckURL(context.Background(), "http://"+host+"/")
 	if err == nil {
 		t.Fatalf("CheckURL(%s): want rejection (resolves to loopback), got nil", host)
 	}
@@ -73,10 +73,10 @@ func TestGuard_RejectsByResolvedIPNotHostname(t *testing.T) {
 
 func TestGuard_AllowPrivate(t *testing.T) {
 	g := &Guard{AllowPrivate: true}
-	if err := g.CheckURL("http://127.0.0.1:9/"); err != nil {
+	if err := g.CheckURL(context.Background(), "http://127.0.0.1:9/"); err != nil {
 		t.Fatalf("AllowPrivate should bypass range check: %v", err)
 	}
-	if err := g.CheckURL("ftp://127.0.0.1/"); err == nil {
+	if err := g.CheckURL(context.Background(), "ftp://127.0.0.1/"); err == nil {
 		t.Fatal("AllowPrivate must not bypass the scheme check")
 	}
 }
