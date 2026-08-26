@@ -68,4 +68,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.levimackay.beacon.widget
-        ENABLE_APP_SANDBOX: NO
+        # Sandboxed: WidgetKit refuses to register an unsandboxed extension,
+        # and this must match the entitlements scripts/install-macos.sh
+        # signs the built appex with.
+        ENABLE_APP_SANDBOX: YES
+        CODE_SIGN_ENTITLEMENTS: BeaconWidget/BeaconWidget.entitlements

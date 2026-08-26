@@ -42,8 +42,12 @@ disappears when the hub moves to the Pi.
 Exactly two transport modes exist. There is deliberately no third.
 
 - **Local** — the hub binds `127.0.0.1` only. A bearer token is generated on
-  first run, stored in the macOS Keychain on the client side and in a `0600`
-  file on the hub side.
+  first run and written to a `0600` file in the hub's support directory. The
+  client reads that same file rather than keeping its own copy in the
+  Keychain, so the token's protection today is the file's permission bit,
+  not Keychain access control. Keychain storage under an app ACL is the
+  upgrade if other unsandboxed processes running as the same user become
+  part of the threat model.
 - **Tailnet** — the hub is published with `tailscale serve`, which supplies a
   real HTTPS certificate, a stable `https://<host>.<tailnet>.ts.net` URL and
   verified caller identity headers. The listener is bound to the Tailscale
@@ -63,7 +67,7 @@ addition rather than a rewrite.
 | Component | Language | Role |
 |---|---|---|
 | `beaconhub` | Go | API, store, scheduler, collectors, incident engine |
-| `Beacon.app` | Swift / SwiftUI | Menu bar panel, main window, notifications, Keychain |
+| `Beacon.app` | Swift / SwiftUI | Menu bar panel, main window, notifications, token file |
 | `BeaconWidget` | Swift / WidgetKit | Small, medium and large widgets |
 | `beacon` | Go | CLI against the same API |
 

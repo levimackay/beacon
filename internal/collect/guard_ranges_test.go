@@ -25,6 +25,17 @@ func TestGuardBlocksCarrierGradeNAT(t *testing.T) {
 	}
 }
 
+// 255.255.255.255 has no legitimate destination for a unicast request, so
+// it is refused like any other special-purpose address, even though the
+// collector's TCP-only dial can't realistically complete a handshake to it
+// anyway.
+func TestGuardBlocksLimitedBroadcast(t *testing.T) {
+	g := NewGuard()
+	if reason := g.blocked(netip.MustParseAddr("255.255.255.255")); reason == "" {
+		t.Error("255.255.255.255 was allowed; the limited broadcast address must be refused")
+	}
+}
+
 // AllowPrivate is the operator saying "this target is on my own network".
 // It must open up their LAN and tailnet without opening the one address
 // whose exposure turns an SSRF into stolen cloud credentials.

@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# None of the jobs below write anything (no commit, tag, release, PR
+# comment, or package publish), so GITHUB_TOKEN gets read-only access
+# rather than the repo's default, which can be read+write.
+permissions:
+  contents: read
+
 env:
   GO_VERSION: "1.26"
 

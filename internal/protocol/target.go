@@ -37,6 +37,25 @@ type Target struct {
 	WarnAfterMS int `json:"warnAfterMs,omitempty"`
 }
 
+// Length caps on the free-text fields. None of these values are ever used
+// as a filesystem path or shell argument (see CONTRIBUTING.md), and every
+// store write binds them as a parameter rather than building SQL from them,
+// so these exist for input hygiene and to keep a pathological payload from
+// bloating storage and every future log line, not to close an injection
+// path.
+const (
+	// maxIDLength is far above the 16-character hex id the server
+	// generates for a target, with room to spare for a client-supplied one.
+	maxIDLength = 128
+	// maxNameLength matches maxIDLength: operator-facing display text, not
+	// a place for an arbitrary payload.
+	maxNameLength = 128
+	// maxContainsLength is generous for a body-substring marker while
+	// bounding how much of each check's response a website target keeps
+	// around for the comparison.
+	maxContainsLength = 1024
+)
+
 // Validate rejects targets that would be unsafe or nonsensical to schedule.
 // It performs no network activity; address reachability is the collector's
 // concern and private-range rejection is the SSRF guard's.
@@ -44,8 +63,14 @@ func (t Target) Validate() error {
 	if t.ID == "" {
 		return errors.New("target id is required")
 	}
+	if len(t.ID) > maxIDLength {
+		return fmt.Errorf("target id must be at most %d characters", maxIDLength)
+	}
 	if t.Name == "" {
 		return errors.New("target name is required")
+	}
+	if len(t.Name) > maxNameLength {
+		return fmt.Errorf("target name must be at most %d characters", maxNameLength)
 	}
 	switch t.Kind {
 	case KindHost, KindWebsite, KindService:
@@ -66,6 +91,9 @@ func (t Target) Validate() error {
 	}
 	if t.WarnAfterMS < 0 {
 		return errors.New("warn-after must not be negative")
+	}
+	if len(t.Contains) > maxContainsLength {
+		return fmt.Errorf("contains must be at most %d characters", maxContainsLength)
 	}
 	return nil
 }

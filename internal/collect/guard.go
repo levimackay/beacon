@@ -27,6 +27,11 @@ var uniqueLocal = netip.MustParsePrefix("fc00::/7")
 // arbitrary CGNAT address from a cloud host is not.
 var carrierGrade = netip.MustParsePrefix("100.64.0.0/10")
 
+// limitedBroadcast is 255.255.255.255 (RFC 919), the IPv4 limited-broadcast
+// address. netip.Addr has no IsBroadcast-equivalent helper, so it is
+// checked explicitly, same as carrierGrade and uniqueLocal above.
+var limitedBroadcast = netip.MustParseAddr("255.255.255.255")
+
 // metadataAddr is the cloud metadata endpoint (AWS/GCP/Azure all use it).
 // It is technically link-local (169.254/16) and would already be rejected
 // by IsLinkLocalUnicast, but it is named explicitly so the reason a request
@@ -159,6 +164,8 @@ func (g *Guard) blocked(addr netip.Addr) string {
 		return "unspecified address"
 	case addr.IsMulticast():
 		return "multicast address"
+	case addr == limitedBroadcast:
+		return "limited broadcast address"
 	}
 	return ""
 }
