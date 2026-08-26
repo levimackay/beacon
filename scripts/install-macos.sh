@@ -50,6 +50,10 @@ cp -R "$APP_PATH" /Applications/
 # an unregistered bundle means an invisible widget.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -f /Applications/Beacon.app
+# xcodebuild registered the build product too, and with two Beacon.app bundles
+# registered, a beacon:// URL can be routed to the one under build/ instead.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -u "$PWD/$APP_PATH"
 
 open /Applications/Beacon.app
 sleep 3

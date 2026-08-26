@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     let poller = HubPoller()
     let deepLink = DeepLinkRouter()
     private var dashboardWindow: NSWindow?
+    /// See `handleGetURL`: a `beacon://` URL that arrives before launch has
+    /// finished is recorded here and presented from
+    /// `applicationDidFinishLaunching` instead of on the spot.
+    private var finishedLaunching = false
+    private var pendingPresentation = false
 
     /// Registered here rather than in `applicationDidFinishLaunching`: a
     /// `beacon://` tap that launches Beacon cold delivers its Apple Event
@@ -41,8 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     /// appearing at all, not a mispositioned one. `NSAppleEventManager` is
     /// the actual mechanism LaunchServices and `NSWorkspace.open` deliver a
     /// custom-scheme URL through underneath that SwiftUI abstraction, so
-    /// handling it here does not depend on any scene ever having been
+    /// receiving it here does not depend on any scene ever having been
     /// opened.
+    ///
+    /// Receiving the URL this early is not the same as being able to show
+    /// a window this early, though: on a cold launch `handleGetURL` only
+    /// records the request, and `applicationDidFinishLaunching` presents
+    /// the dashboard. See `handleGetURL` for why.
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSAppleEventManager.shared().setEventHandler(
             self,
@@ -55,6 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         UNUserNotificationCenter.current().delegate = self
         poller.start()
         registerAsLoginItem()
+        finishedLaunching = true
+        if pendingPresentation {
+            pendingPresentation = false
+            presentDashboard()
+        }
     }
 
     @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
@@ -64,6 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             return
         }
         deepLink.handle(url)
+        // On a cold launch (widget tap or `open beacon://open` with Beacon
+        // not running) this event is delivered between
+        // `applicationWillFinishLaunching` and
+        // `applicationDidFinishLaunching`. Presenting from inside that gap
+        // does not work: the window is created, the activation policy is
+        // switched, `makeKeyAndOrderFront` reports the window visible at a
+        // sensible frame, and nothing ever draws on screen, because AppKit
+        // has not finished bringing the process up yet. So the URL is
+        // always routed, and presentation waits until launch has finished.
+        // A warm launch, where the app is already running, presents at
+        // once as before.
+        guard finishedLaunching else {
+            pendingPresentation = true
+            return
+        }
         presentDashboard()
     }
 
