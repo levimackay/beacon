@@ -389,5 +389,5 @@ branch protection rule for `main`). At minimum:
 - Do not allow force pushes to `main`.
 - Do not allow deletion of `main`.
 
-**Last updated:** 2026-08-28 07:09 PDT
+**Last updated:** 2026-08-29 11:47 PDT
 
