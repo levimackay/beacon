@@ -43,7 +43,10 @@ Built and tested:
 - The `beaconhub` binary, and installing it as a per-user launchd agent
   so monitoring survives quitting a terminal and restarts at login.
 - The macOS menu bar app and the WidgetKit widget (small, medium and
-  large), in `apps/macos`. See `apps/macos/README.md`.
+  large), in `apps/macos`. See `apps/macos/README.md`. The app can send a
+  native notification when an incident opens or clears, toggleable from
+  the panel, and a `beacon://` link (from a notification tap or a widget
+  tap) opens the dashboard window.
 - The `beacon` CLI (`status`, `devices`, `websites`, `services`,
   `incidents`, `add`, `rm`, `diagnostics`, `version`).
 - First-run configuration: token generation, the support directory, and
