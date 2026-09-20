@@ -113,6 +113,9 @@ down instead of healthy. `--warn-after 2s` reports warning rather than
 down when a response is slower than that, instead of leaving a merely
 slow site indistinguishable from a healthy one. Both are optional.
 
+`--private` lets a target resolve to a LAN, loopback or Tailscale address,
+which the SSRF guard refuses by default (see Security model).
+
 A site that is currently unreachable can still be added: being down is
 the condition you are asking Beacon to watch for, so it is accepted and
 reported as down rather than refused.
@@ -318,9 +321,11 @@ accident.
 installed or run as root.
 
 What this does not yet cover: multi-user access control (there is
-currently one caller, authenticated by one shared token) and anything to
-do with the macOS app, the widget, or a web dashboard, none of which
-exist yet.
+currently one caller, authenticated by one shared token) and a web
+dashboard, which does not exist yet. The macOS app reads the hub's token
+file directly rather than from the Keychain, so on the app side the
+token's protection is the file's permission bit; `docs/design.md`
+describes Keychain storage as the upgrade.
 
 ## Development
 
@@ -387,7 +392,7 @@ branch protection rule for `main`). At minimum:
 - Require a pull request before merging, with at least one approval.
 - Require status checks to pass before merging, and select the CI jobs
   in `.github/workflows/ci.yml` (gofmt, go vet, test, govulncheck,
-  cross-compile) as required checks.
+  resolver-parity, cross-compile) as required checks.
 - Require branches to be up to date before merging.
 - Do not allow force pushes to `main`.
 - Do not allow deletion of `main`.
