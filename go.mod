@@ -3,7 +3,7 @@ module github.com/levimackay/beacon
 go 1.26.5
 
 require (
-	github.com/shirou/gopsutil/v4 v4.26.7
+	github.com/shirou/gopsutil/v4 v4.26.8
 	modernc.org/sqlite v1.57.0
 )
 
