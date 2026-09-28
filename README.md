@@ -35,8 +35,8 @@ Built and tested:
   or escalates an incident, and three before it closes one (closing is
   held to a higher bar on purpose; see `docs/design.md`).
 - Network outage detection: when every website target fails at once while
-  a local host or service check keeps succeeding, Beacon raises one
-  incident against the network rather than one against every site.
+  a local host check keeps succeeding, Beacon raises one incident against
+  the network rather than one against every site.
 - The HTTP API, bearer auth, split request and authentication rate
   limits, and the scheduler that ties the collectors, the store and the
   incident machine together on a timer.
@@ -61,6 +61,9 @@ Planned, and explicitly not built:
 - The Raspberry Pi installer and systemd unit
 - `tailscale serve` transport (today the hub is loopback-only; see
   Architecture)
+- Service checks (process or unit liveness via launchd or systemd). The
+  target kind and the outage classifier's handling of it already exist;
+  there is no collector yet and no way to add one.
 
 Each of those is a planned addition to the current architecture, not a
 redesign of it.
